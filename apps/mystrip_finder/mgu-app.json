@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "mystrip_finder",
+  "version": "0.1.0",
+  "tree": "mystrip_finder@0.1.0",
+  "modules": [
+    "src/finder.js",
+    "src/scan.js",
+    "src/usb.js"
+  ],
+  "sdk": [
+    "oap-sdk/src/core/OnlineApp.js",
+    "oap-sdk/src/logging/logging"
+  ]
+}

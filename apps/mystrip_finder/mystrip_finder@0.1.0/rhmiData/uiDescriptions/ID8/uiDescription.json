@@ -1,0 +1,375 @@
+{
+  "schemaVersion": "1.3.0",
+  "containers": {
+    "1": {
+      "type": "state",
+      "name": "ST_OnlineApps_MyStripFinder",
+      "components": {
+        "10": {
+          "type": "title",
+          "name": "ST_OnlineApps_MyStripFinder_Title",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "SID_MYSTRIP_SIGNAL_FINDER",
+                "type": "StringId"
+              }
+            }
+          ]
+        },
+        "20": {
+          "type": "label",
+          "name": "finderStatus",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 0,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "SID_MYSTRIP_STARTING",
+                "type": "StringId"
+              }
+            }
+          ]
+        },
+        "21": {
+          "type": "button",
+          "name": "finderScan",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 3,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "PrimaryText": {
+                "value": "SID_MYSTRIP_SCAN_AGAIN",
+                "type": "StringId"
+              },
+              "FrequencyText": {
+                "value": "",
+                "type": "Text"
+              },
+              "FrequencyVisible": {
+                "value": false,
+                "type": "Bool"
+              },
+              "IconVisible": {
+                "value": false,
+                "type": "Bool"
+              },
+              "ProgressVisible": {
+                "value": false,
+                "type": "Bool"
+              },
+              "IsPlaying": {
+                "value": false,
+                "type": "Bool"
+              }
+            }
+          ]
+        },
+        "22": {
+          "type": "button",
+          "name": "finderSave",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 3,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "PrimaryText": {
+                "value": "SID_MYSTRIP_SAVE_REPORT_TO_USB",
+                "type": "StringId"
+              },
+              "FrequencyText": {
+                "value": "",
+                "type": "Text"
+              },
+              "FrequencyVisible": {
+                "value": false,
+                "type": "Bool"
+              },
+              "IconVisible": {
+                "value": false,
+                "type": "Bool"
+              },
+              "ProgressVisible": {
+                "value": false,
+                "type": "Bool"
+              },
+              "IsPlaying": {
+                "value": false,
+                "type": "Bool"
+              }
+            }
+          ]
+        },
+        "23": {
+          "type": "button",
+          "name": "finderIfaces",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 3,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "PrimaryText": {
+                "value": "SID_MYSTRIP_INTERFACES_FOUND",
+                "type": "StringId"
+              },
+              "FrequencyText": {
+                "value": "",
+                "type": "Text"
+              },
+              "FrequencyVisible": {
+                "value": true,
+                "type": "Bool"
+              },
+              "IconVisible": {
+                "value": false,
+                "type": "Bool"
+              },
+              "ProgressVisible": {
+                "value": false,
+                "type": "Bool"
+              },
+              "IsPlaying": {
+                "value": false,
+                "type": "Bool"
+              }
+            }
+          ]
+        },
+        "24": {
+          "type": "button",
+          "name": "finderList",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 3,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "PrimaryText": {
+                "value": "",
+                "type": "Text"
+              },
+              "FrequencyText": {
+                "value": "",
+                "type": "Text"
+              },
+              "FrequencyVisible": {
+                "value": true,
+                "type": "Bool"
+              },
+              "IconVisible": {
+                "value": false,
+                "type": "Bool"
+              },
+              "ProgressVisible": {
+                "value": false,
+                "type": "Bool"
+              },
+              "IsPlaying": {
+                "value": false,
+                "type": "Bool"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "2": {
+      "type": "state",
+      "name": "ST_OnlineApps_MyStripFinderDetail",
+      "components": {
+        "11": {
+          "type": "title",
+          "name": "ST_OnlineApps_MyStripFinderDetail_Title",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "SID_MYSTRIP_ENTRY",
+                "type": "StringId"
+              }
+            }
+          ]
+        },
+        "30": {
+          "type": "label",
+          "name": "finderDetailName",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 0,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "",
+                "type": "Text"
+              }
+            }
+          ]
+        },
+        "31": {
+          "type": "label",
+          "name": "finderDetailWhere",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 0,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "",
+                "type": "Text"
+              }
+            }
+          ]
+        },
+        "32": {
+          "type": "label",
+          "name": "finderDetailText",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 0,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "",
+                "type": "Text"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "3": {
+      "type": "state",
+      "name": "ST_OnlineApps_MyStripFinderIfaces",
+      "components": {
+        "12": {
+          "type": "title",
+          "name": "ST_OnlineApps_MyStripFinderIfaces_Title",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "Text": {
+                "value": "SID_MYSTRIP_INTERFACES_FOUND",
+                "type": "StringId"
+              }
+            }
+          ]
+        },
+        "40": {
+          "type": "button",
+          "name": "finderIfaceList",
+          "properties": {
+            "Visible": {
+              "value": 1,
+              "type": "UInt"
+            },
+            "Focusable": {
+              "value": 3,
+              "type": "UInt"
+            }
+          },
+          "rows": [
+            {
+              "PrimaryText": {
+                "value": "",
+                "type": "Text"
+              },
+              "FrequencyText": {
+                "value": "",
+                "type": "Text"
+              },
+              "FrequencyVisible": {
+                "value": true,
+                "type": "Bool"
+              },
+              "IconVisible": {
+                "value": false,
+                "type": "Bool"
+              },
+              "ProgressVisible": {
+                "value": false,
+                "type": "Bool"
+              },
+              "IsPlaying": {
+                "value": false,
+                "type": "Bool"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
