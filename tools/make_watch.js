@@ -1,6 +1,7 @@
 'use strict';
 /**
- * Builds the Heat Watch apps (apps/mystrip_watchseat, apps/mystrip_watchwheel)
+ * Builds the Heat Watch apps (apps/mystrip_watchseat, apps/mystrip_watchwheel,
+ * apps/mystrip_watchmaster)
  * from tools/watch/src and Signal Finder's package files, one per
  * interface, so a missing interface on a head unit costs only its own app:
  * the head unit refuses an app whose manifest names an interface its
@@ -24,7 +25,7 @@ const SRC = path.join(__dirname, 'watch', 'src');
 const FINDER = path.join(REPO, 'apps', 'mystrip_finder');
 const FINDER_META = JSON.parse(fs.readFileSync(path.join(FINDER, 'mgu-app.json'), 'utf8'));
 const FINDER_TREE = path.join(FINDER, FINDER_META.tree);
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 
 const TARGETS = [
     { id: 'mystrip_watchseat', prefix: 'MyStripWatchSeat', title: 'Heat Watch Seats', loggingId: 'MSWS',
@@ -32,7 +33,10 @@ const TARGETS = [
         description: 'Live log of the climate interface\'s values while the car\'s seat heating buttons are pressed; read-only' },
     { id: 'mystrip_watchwheel', prefix: 'MyStripWatchWheel', title: 'Heat Watch Wheel', loggingId: 'MSWW',
         iface: 'de.bmw.body.steeringwheelcomfort.SteeringWheelClimate',
-        description: 'Live log of the steering wheel climate interface\'s values while its heating button is pressed; read-only' }
+        description: 'Live log of the steering wheel climate interface\'s values while its heating button is pressed; read-only' },
+    { id: 'mystrip_watchmaster', prefix: 'MyStripWatchMaster', title: 'Heat Watch Master', loggingId: 'MSWM',
+        iface: 'de.bmw.infotainment.climate.climatemaster.ClimateMaster',
+        description: 'Live log of the climate master interface\'s values (seat and steering wheel heating) while the heating buttons are pressed; read-only' }
 ];
 
 function uuid(seed) {

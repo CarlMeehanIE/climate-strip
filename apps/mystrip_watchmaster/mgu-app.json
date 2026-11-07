@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "mystrip_watchmaster",
+  "version": "0.1.1",
+  "tree": "mystrip_watchmaster@0.1.1",
+  "modules": [
+    "src/watch.js",
+    "src/iface.js",
+    "src/catalog.js",
+    "src/target.js"
+  ],
+  "sdk": [
+    "oap-sdk/src/core/OnlineApp.js",
+    "oap-sdk/src/logging/logging",
+    "oap-sdk/src/someip/someipBuilders"
+  ]
+}

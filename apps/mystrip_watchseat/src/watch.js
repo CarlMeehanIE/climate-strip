@@ -74,6 +74,7 @@ class Watch extends OnlineApp {
         this._shutdownPromise = null;
         this._started = false;
         this._phase = 'Starting';       // what the status line says while not watching
+        this._instance = null;          // the instance in use
         this._watching = 0;             // fields subscribed
         this._failed = [];              // fields that could not be subscribed: 'name: why'
         this._changes = 0;
@@ -196,20 +197,19 @@ class Watch extends OnlineApp {
         this._render();
         let fields = [];
         let proxy = null;
+        let info = null;
         return readInterface({ name: IFACE })
             .then((r) => {
                 if (!r.found) {
                     throw new Error(`${IFACE}: ${r.error}`);
                 }
+                info = r;
                 fields = r.fields.filter((f) => f.notify || f.get).slice(0, MAX_FIELDS);
-                logger.info(`${IFACE} instance ${r.instance}: ${fields.length} fields`);
-                this._phase = `Connecting to the service (instance ${r.instance})…`;
-                this._render();
-                return someipBuilders.buildTypedProxy(IFACE, r.instance);
+                logger.info(`${IFACE}: ${fields.length} fields, instances to try ${r.instances.join(', ')} (catalogue: ${r.raw})`);
+                return this._connect(r.instances, r.raw);
             })
             .then((p) => {
                 proxy = p;
-                return proxy.init();
             })
             .then(() => {
                 this._phase = 'Waiting for the service…';
@@ -231,6 +231,33 @@ class Watch extends OnlineApp {
                 logger.warn(this._phase);
                 this._render();
             });
+    }
+
+    /* The first instance the SDK accepts: each is built and initialised in
+     * turn; one refused ("Instance not available") moves on to the next. */
+    _connect(instances, raw) {
+        const tried = [];
+        const next = (i) => {
+            if (i >= instances.length) {
+                return Promise.reject(new Error(`no instance accepted (tried ${tried.join('; ')}; catalogue entry ${raw})`));
+            }
+            const inst = instances[i];
+            this._instance = inst;
+            this._phase = `Connecting to the service (instance ${inst})…`;
+            this._render();
+            let p = null;
+            return Promise.resolve(someipBuilders.buildTypedProxy(IFACE, inst))
+                .then((built) => {
+                    p = built;
+                    return p.init();
+                })
+                .then(() => p, (err) => {
+                    tried.push(`${inst}: ${err && err.message}`.slice(0, 120));
+                    logger.info(`instance ${inst} refused: ${err && err.message}`);
+                    return next(i + 1);
+                });
+        };
+        return next(0);
     }
 
     _watchField(proxy, f) {
@@ -368,7 +395,7 @@ class Watch extends OnlineApp {
             return `${short}: ${this._phase}`;
         }
         const failed = this._failed.length ? `, ${this._failed.length} not watchable (first: ${this._failed[0]})` : '';
-        return `${short}: watching ${this._watching} fields, ${this._changes} changes${failed}. ` +
+        return `${short} (instance ${this._instance}): watching ${this._watching} fields, ${this._changes} changes${failed}. ` +
             'Press the car\'s heating buttons now.';
     }
 

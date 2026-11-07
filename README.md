@@ -8,6 +8,7 @@ Personal apps for a BMW iDrive 8 head unit, installed through the
 | Signal Finder | `mystrip_finder` | Read-only. Reads the head unit's SOME/IP interface catalogue (`/etc/oap/someip/someip-interfaces.json`) and lists the interfaces with seat-heating or steering-wheel-heating parts. Tap an interface for its parts, each marked GET / SET / NOTIFY (fields), CALL (methods) or EVENT; tap a part for its data type spelled out and its raw catalogue entry. Sends nothing to the car. |
 | Heat Watch Seats | `mystrip_watchseat` | Read-only. A live log of every value that changes on `de.bmw.infotainment.climate.Climate` while the car's own seat heating buttons are pressed (newest first; start values marked "start"). **Clear log** empties it. |
 | Heat Watch Wheel | `mystrip_watchwheel` | The same for `de.bmw.body.steeringwheelcomfort.SteeringWheelClimate` and the steering wheel heating button. |
+| Heat Watch Master | `mystrip_watchmaster` | The same for `de.bmw.infotainment.climate.climatemaster.ClimateMaster` (seat and steering wheel heating). |
 
 Each Heat Watch app names its interface in its manifest, and the head unit
 refuses an app whose interface its catalogue lacks, so they are separate
@@ -23,8 +24,7 @@ already on the car, so no SDK is in this repository.
 1. In the Store, open **Sources**, **Add source**, and type this
    repository as `<your GitHub name>/climate-strip`. Pick its branch
    (`main`) if the Store asks for a channel.
-2. Install **Signal Finder**, **Heat Watch Seats** and **Heat Watch
-   Wheel**, then restart the head unit once when the
+2. Install **Signal Finder** and the **Heat Watch** apps, then restart the head unit once when the
    Store asks (on iDrive 8 an app installs at the next start).
 3. Open **Signal Finder** from *All apps*. It reads the catalogue by
    itself when it opens (a few seconds).

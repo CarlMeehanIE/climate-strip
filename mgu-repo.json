@@ -33,6 +33,17 @@
       ],
       "title": "Heat Watch Wheel",
       "description": "Live log of the steering wheel climate interface's values while its heating button is pressed; read-only"
+    },
+    {
+      "id": "mystrip_watchmaster",
+      "kind": "app",
+      "path": "apps/mystrip_watchmaster",
+      "build": "unit",
+      "mguHmi": [
+        "ID8"
+      ],
+      "title": "Heat Watch Master",
+      "description": "Live log of the climate master interface's values (seat and steering wheel heating) while the heating buttons are pressed; read-only"
     }
   ]
 }

@@ -37,7 +37,7 @@ const CAT = {
         } }
     },
     datatypes: {},
-    instanceIDs: { [IFACE]: ['7'] }
+    instanceIDs: { [IFACE]: [{ name: 'Climate', instanceId: 7 }] }
 };
 const CAT_FILE = path.join(ROOT, 'cat.json');
 fs.writeFileSync(CAT_FILE, JSON.stringify(CAT));
@@ -84,10 +84,15 @@ class OnlineApp extends EventEmitter {
 const subs = {};
 const values = { statusSeatHeatingDR: { level: 0 }, statusSeatHeatingPS: { level: 0 }, statusBroken: 1 };
 let built = null;
+const tried = [];
 const someipBuilders = {
     buildTypedProxy: (iface, instance) => {
         built = `${iface} ${instance}`;
-        const proxy = { init: () => Promise.resolve(), waitUntilAvailable: () => Promise.resolve() };
+        tried.push(instance);
+        // the SDK refuses every instance but 7, as the car did for "[object Object]"
+        const proxy = { init: () => (instance === '7' ? Promise.resolve() :
+            Promise.reject(new Error("Instance not available in 'instances' section of interface configuration"))),
+        waitUntilAvailable: () => Promise.resolve() };
         ['statusSeatHeatingDR', 'statusSeatHeatingPS', 'statusBroken', 'statusSilent'].forEach((f) => {
             proxy[f] = {
                 subscribe: (cb) => (f === 'statusBroken' ? Promise.reject(new Error('access denied')) : (subs[f] = cb, Promise.resolve())),
@@ -132,10 +137,11 @@ async function until(pred, what) {
     app.emit('initialized');
     await until(() => /watching \d+ fields/.test(last(`${S}.0.Text`) || ''), 'watching');
     await tick(400);
-    assert.strictEqual(built, `${IFACE} 7`, 'instance from the catalogue');
+    assert.strictEqual(built, `${IFACE} 7`, 'instance from the catalogue record');
+    assert.deepStrictEqual(tried, ['7'], 'the id-like key tried first');
     const short = IFACE.split('.').pop();
     console.log('status:', last(`${S}.0.Text`));
-    assert.strictEqual(last(`${S}.0.Text`), `${short}: watching 2 fields, 0 changes, 2 not watchable ` +
+    assert.strictEqual(last(`${S}.0.Text`), `${short} (instance 7): watching 2 fields, 0 changes, 2 not watchable ` +
         '(first: statusBroken: access denied). Press the car\'s heating buttons now.');
     assert.strictEqual(last(`${L}.rows`), '3', 'three start rows (getter id 0 not read)');
     assert.ok(/^\d\d:\d\d:\d\d start · statusSeatHeatingDR = \{"level":0\}$/.test(row(2) || row(1) || row(0)), 'start row');
@@ -168,6 +174,13 @@ async function until(pred, what) {
 
     assert.ok(!logged.some((l) => /MISS|failed:/.test(l)), 'no warnings:\n' + logged.join('\n'));
     console.log(`${ID}: Heat Watch checks passed`);
+
+    // the candidates: a record's id-like keys first, then its other values, then '1'
+    const { candidates } = realIface;
+    assert.deepStrictEqual(candidates([{ name: 'Climate', instanceId: 7 }]), ['7', 'Climate', '1']);
+    assert.deepStrictEqual(candidates(['3']), ['3', '1']);
+    assert.deepStrictEqual(candidates(undefined), ['1']);
+    assert.deepStrictEqual(candidates({ instances: [{ id: 'Inst2' }] }), ['Inst2', '1']);
 
     // an interface missing from the catalogue: a second run
     fs.writeFileSync(CAT_FILE, JSON.stringify({ interfaces: {}, datatypes: {} }));

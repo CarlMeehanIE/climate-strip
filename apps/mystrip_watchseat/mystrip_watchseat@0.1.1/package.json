@@ -1,7 +1,7 @@
 {
-  "name": "mystrip_watchwheel",
-  "version": "0.1.0",
-  "description": "Live log of the steering wheel climate interface's values while its heating button is pressed; read-only",
+  "name": "mystrip_watchseat",
+  "version": "0.1.1",
+  "description": "Live log of the climate interface's values while the car's seat heating buttons are pressed; read-only",
   "private": false,
   "main": "javascript/runner.js",
   "oapAppSettings": {
@@ -11,7 +11,7 @@
     "priority": "PRIO_MEDIUM",
     "visibility": "FOREGROUND",
     "latencyClass": "FOREGROUND",
-    "loggingId": "MSWW",
+    "loggingId": "MSWS",
     "userLoginRequired": false,
     "backgroundPriority": 150,
     "someipManifest": "manifest.json"
