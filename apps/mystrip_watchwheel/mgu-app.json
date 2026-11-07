@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "id": "mystrip_watchwheel",
-  "version": "0.1.1",
-  "tree": "mystrip_watchwheel@0.1.1",
+  "version": "0.1.2",
+  "tree": "mystrip_watchwheel@0.1.2",
   "modules": [
     "src/watch.js",
     "src/iface.js",

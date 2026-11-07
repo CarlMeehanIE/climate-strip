@@ -34,6 +34,9 @@ const CAT = {
             statusBroken: { getter: { id: 5 }, notifier: { eventId: 6 }, dataRef: 'X' },
             statusNoProxy: { notifier: { eventId: 7 }, dataRef: 'X' },
             statusSilent: { getter: { id: 0 }, dataRef: 'X' }
+        }, events: {
+            seatHeatingOperated: { eventId: 1, outputs: [] },
+            wheelHeatingOperated: { eventId: 2, outputs: [] }
         } }
     },
     datatypes: {},
@@ -93,6 +96,9 @@ const someipBuilders = {
         const proxy = { init: () => (instance === '7' ? Promise.resolve() :
             Promise.reject(new Error("Instance not available in 'instances' section of interface configuration"))),
         waitUntilAvailable: () => Promise.resolve() };
+        // one event through its own attribute, the other through the proxy's subscribe({ name, onReceive })
+        proxy.seatHeatingOperated = { subscribe: (cb) => { subs.seatHeatingOperated = cb; return Promise.resolve(); } };
+        proxy.subscribe = (o) => { subs[o.name] = o.onReceive; return Promise.resolve(); };
         ['statusSeatHeatingDR', 'statusSeatHeatingPS', 'statusBroken', 'statusSilent'].forEach((f) => {
             proxy[f] = {
                 subscribe: (cb) => (f === 'statusBroken' ? Promise.reject(new Error('access denied')) : (subs[f] = cb, Promise.resolve())),
@@ -141,7 +147,7 @@ async function until(pred, what) {
     assert.deepStrictEqual(tried, ['7'], 'the id-like key tried first');
     const short = IFACE.split('.').pop();
     console.log('status:', last(`${S}.0.Text`));
-    assert.strictEqual(last(`${S}.0.Text`), `${short} (instance 7): watching 2 fields, 0 changes, 2 not watchable ` +
+    assert.strictEqual(last(`${S}.0.Text`), `${short} (instance 7): watching 2 fields and 2 events, 0 changes, 2 not watchable ` +
         '(first: statusBroken: access denied). Press the car\'s heating buttons now.');
     assert.strictEqual(last(`${L}.rows`), '3', 'three start rows (getter id 0 not read)');
     assert.ok(/^\d\d:\d\d:\d\d start · statusSeatHeatingDR = \{"level":0\}$/.test(row(2) || row(1) || row(0)), 'start row');
@@ -164,6 +170,16 @@ async function until(pred, what) {
     await until(() => last(`${L}.rows`) === '5', 'passenger row');
     await tick(50);
     assert.ok(/statusSeatHeatingPS = \{"level":1\}$/.test(row(0)));
+
+    // events: always a row, with what they carry
+    subs.seatHeatingOperated({ clientGroupId: 4, operationZone: 1, configuredIntensityLevel: 2 });
+    await until(() => last(`${L}.rows`) === '6', 'event row');
+    await tick(50);
+    assert.ok(/^\d\d:\d\d:\d\d EVENT seatHeatingOperated = \{"clientGroupId":4,"operationZone":1,"configuredIntensityLevel":2\}$/.test(row(0)), row(0));
+    subs.wheelHeatingOperated({ clientGroupId: 4 });
+    await until(() => last(`${L}.rows`) === '7', 'second event row');
+    subs.wheelHeatingOperated({ clientGroupId: 4 });
+    await until(() => last(`${L}.rows`) === '8', 'repeated event still a row');
 
     // Clear log
     byName[`${PREFIX}Clear`].emit('action', {});

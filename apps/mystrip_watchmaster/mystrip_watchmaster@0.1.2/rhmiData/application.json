@@ -1,11 +1,11 @@
 {
   "schemaVersion": "1.3.0",
   "application": {
-    "uuid": "7f6f5d73-d84d-4bc6-8042-005a554468bf",
+    "uuid": "13f30bd5-92c0-41bc-8288-61ef955b86ed",
     "type": "OnlineApp",
-    "name": "mystrip_watchseat",
+    "name": "mystrip_watchmaster",
     "vendor": "owner",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "defaultLanguage": "en_GB",
     "uiDescriptions": [
       {
@@ -16,8 +16,8 @@
         ]
       }
     ],
-    "stringBundleUuid": "81e0189d-108a-4e5b-8513-a4403db8f18f",
-    "resourceBundleUuid": "1d135ed2-7562-45d5-89d6-e2bf7470b1c5",
+    "stringBundleUuid": "7e851d10-5a9b-456e-844c-89e2edf025f2",
+    "resourceBundleUuid": "b2d15520-5971-4dab-899c-3470b2f764e0",
     "variantGroups": [
       {
         "stringsPath": "./variantGroups/Common/texts",
@@ -32,10 +32,10 @@
     ],
     "entryPoints": [
       {
-        "name": "mystrip_watchseat",
-        "uuid": "4dee54f9-7754-4924-8fd3-22c3abf679ac",
-        "textId": "SID_MYSTRIPWATCHSEAT_HEAT_WATCH_SEATS",
-        "icon": "mystrip_watchseat_icon.png",
+        "name": "mystrip_watchmaster",
+        "uuid": "8a6603fb-8823-44ec-81e1-45191a07f882",
+        "textId": "SID_MYSTRIPWATCHMASTER_HEAT_WATCH_MASTER",
+        "icon": "mystrip_watchmaster_icon.png",
         "insertionStateId": 20974,
         "insertionFocusId": 2,
         "insertionMode": "INSERT_BELOW",

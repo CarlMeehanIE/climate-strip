@@ -4,7 +4,7 @@
  * catalogue (/etc/oap/someip/someip-interfaces.json) without parsing it
  * whole (src/catalog.js indexObject).
  *
- *   readInterface({ name, file }) -> Promise<{ found, instances, raw, fields: [{ name, get, notify }], error? }>
+ *   readInterface({ name, file }) -> Promise<{ found, instances, raw, fields: [{ name, get, notify }], events: [name], error? }>
  *
  * instances: the instance ids to try, in order: those the catalogue's
  * instanceIDs entry holds (plain values, or the values inside its records,
@@ -83,7 +83,8 @@ function readInterface(opts) {
             } catch (e) {
                 raw = String(inst);
             }
-            resolve({ found: true, instances: candidates(inst), raw, fields });
+            const events = Object.keys(iface.events || iface.broadcasts || {});
+            resolve({ found: true, instances: candidates(inst), raw, fields, events });
         } catch (e) {
             resolve({ found: false, fields: [], error: e.message });
         }

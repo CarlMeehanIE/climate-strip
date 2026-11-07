@@ -4,9 +4,11 @@
  * interface) while the car's own buttons are pressed, so a climate strip
  * app can be written against what those buttons really change.
  *
- * On open it reads the interface's fields from the catalogue (src/iface.js),
- * reads each field once ("start" rows) and subscribes to every field that
- * notifies; each change becomes a row, newest first. Clear log empties it.
+ * On open it reads the interface's fields and events from the catalogue
+ * (src/iface.js), reads each field once ("start" rows) and subscribes to
+ * every field that notifies and every event; each change or event becomes
+ * a row, newest first (events marked EVENT, with everything they carry, such
+ * as the id of the client that pressed a button). Clear log empties it.
  *
  * Read-only towards the car: it reads and subscribes, and sends no
  * commands.
@@ -76,6 +78,7 @@ class Watch extends OnlineApp {
         this._phase = 'Starting';       // what the status line says while not watching
         this._instance = null;          // the instance in use
         this._watching = 0;             // fields subscribed
+        this._watchedEvents = 0;               // events subscribed
         this._failed = [];              // fields that could not be subscribed: 'name: why'
         this._changes = 0;
         this._rows = [];                // log rows, newest first
@@ -196,6 +199,7 @@ class Watch extends OnlineApp {
         this._phase = 'Reading the catalogue…';
         this._render();
         let fields = [];
+        let events = [];
         let proxy = null;
         let info = null;
         return readInterface({ name: IFACE })
@@ -205,6 +209,7 @@ class Watch extends OnlineApp {
                 }
                 info = r;
                 fields = r.fields.filter((f) => f.notify || f.get).slice(0, MAX_FIELDS);
+                events = (r.events || []).slice(0, MAX_FIELDS);
                 logger.info(`${IFACE}: ${fields.length} fields, instances to try ${r.instances.join(', ')} (catalogue: ${r.raw})`);
                 return this._connect(r.instances, r.raw);
             })
@@ -221,9 +226,10 @@ class Watch extends OnlineApp {
                 return Promise.resolve(proxy.waitUntilAvailable()).then(() => clearTimeout(note));
             })
             .then(() => fields.reduce((p, f) => p.then(() => this._watchField(proxy, f)), Promise.resolve()))
+            .then(() => events.reduce((p, e) => p.then(() => this._watchEvent(proxy, e)), Promise.resolve()))
             .then(() => {
                 this._phase = null;
-                logger.info(`watching ${this._watching} fields, ${this._failed.length} failed`);
+                logger.info(`watching ${this._watching} fields and ${this._watchedEvents} events, ${this._failed.length} failed`);
                 this._render();
             })
             .catch((err) => {
@@ -277,6 +283,41 @@ class Watch extends OnlineApp {
         return Promise.all(steps).catch((err) => {
             this._failed.push(`${f.name}: ${err && err.message}`);
         });
+    }
+
+    /* An event: through its own attribute (proxy[name].subscribe), else the
+     * proxy's subscribe({ name, onReceive }) as the native binding has it. */
+    _watchEvent(proxy, name) {
+        const cb = (v) => this._event(name, v);
+        let sub = null;
+        try {
+            if (proxy[name] && typeof proxy[name].subscribe === 'function') {
+                sub = proxy[name].subscribe(cb);
+            } else if (typeof proxy.subscribe === 'function') {
+                sub = proxy.subscribe({ name, onReceive: cb });
+            } else {
+                this._failed.push(`${name}: no way to subscribe to the event`);
+                return Promise.resolve();
+            }
+        } catch (err) {
+            this._failed.push(`${name}: ${err && err.message}`);
+            return Promise.resolve();
+        }
+        return Promise.resolve(sub).then(() => { this._watchedEvents++; }, (err) => {
+            this._failed.push(`${name}: ${err && err.message}`);
+        });
+    }
+
+    /* An event: always a row, it is something that happened. */
+    _event(name, v) {
+        const s = show(v);
+        this._changes++;
+        logger.info(`event ${name} = ${s}`);
+        this._rows.unshift(`${clock(new Date())} EVENT ${name} = ${s}`);
+        if (this._rows.length > MAX_ROWS) {
+            this._rows.length = MAX_ROWS;
+        }
+        this._scheduleRender();
     }
 
     /* A value read or notified: a row when it differs from the field's last one. */
@@ -395,7 +436,8 @@ class Watch extends OnlineApp {
             return `${short}: ${this._phase}`;
         }
         const failed = this._failed.length ? `, ${this._failed.length} not watchable (first: ${this._failed[0]})` : '';
-        return `${short} (instance ${this._instance}): watching ${this._watching} fields, ${this._changes} changes${failed}. ` +
+        const evs = this._watchedEvents ? ` and ${this._watchedEvents} events` : '';
+        return `${short} (instance ${this._instance}): watching ${this._watching} fields${evs}, ${this._changes} changes${failed}. ` +
             'Press the car\'s heating buttons now.';
     }
 

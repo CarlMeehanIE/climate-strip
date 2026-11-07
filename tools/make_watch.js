@@ -25,7 +25,7 @@ const SRC = path.join(__dirname, 'watch', 'src');
 const FINDER = path.join(REPO, 'apps', 'mystrip_finder');
 const FINDER_META = JSON.parse(fs.readFileSync(path.join(FINDER, 'mgu-app.json'), 'utf8'));
 const FINDER_TREE = path.join(FINDER, FINDER_META.tree);
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 
 const TARGETS = [
     { id: 'mystrip_watchseat', prefix: 'MyStripWatchSeat', title: 'Heat Watch Seats', loggingId: 'MSWS',
