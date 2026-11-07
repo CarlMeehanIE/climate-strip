@@ -28,9 +28,9 @@ const PARSE_MAX = 6 * 1024 * 1024;      // JSON files up to this size are parsed
 const FILE_MAX = 200 * 1024 * 1024;     // bigger files are skipped
 const CHUNK = 256 * 1024;
 const WINDOW = 700;                     // characters kept either side of a match in a streamed file
-const TEXT_MAX = 2500;
-const MAX_MATCHES = 600;
-const MAX_INTERFACES = 300;
+const TEXT_MAX = 1500;
+const MAX_MATCHES = 4000;
+const MAX_INTERFACES = 600;
 
 /* What counts as seat or steering-wheel heating (BMW names: statusSeatHeatingDR,
  * SteeringWheelClimate, heatingState, ...). */

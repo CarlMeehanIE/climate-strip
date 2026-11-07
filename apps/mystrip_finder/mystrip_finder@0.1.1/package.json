@@ -1,6 +1,6 @@
 {
   "name": "mystrip_finder",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Lists the seat-heating and steering-wheel-heating entries of this head unit's interface catalogue",
   "private": false,
   "main": "javascript/runner.js",

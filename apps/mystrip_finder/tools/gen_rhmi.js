@@ -9,9 +9,14 @@
  * Screens (LT_State_Wide_List, rows LT_Button_MediaEntry_1Row, labels
  * LT_ScrollLabel):
  *   1  ST_OnlineApps_MyStripFinder        status, Scan again, Save report to
- *                                         USB, Interfaces found, the matches
+ *                                         USB, Interfaces found, the files
+ *                                         with matches (count and path)
+ *   4  ST_OnlineApps_MyStripFinderFile    one file's matches
  *   2  ST_OnlineApps_MyStripFinderDetail  one match in full
  *   3  ST_OnlineApps_MyStripFinderIfaces  the climate / seat / wheel interfaces
+ *
+ * A row's words all go in its first line (PrimaryText): iDrive 8 shows no
+ * second column in these rows.
  *
  * No state has a parent: iDrive 8 refuses parents of parents, and its own
  * history takes the states back one at a time.
@@ -60,7 +65,11 @@ const STATES = [
         button(21, 'finderScan', 'Scan again'),
         button(22, 'finderSave', 'Save report to USB'),
         row(23, 'finderIfaces', 'Interfaces found'),
-        list(24, 'finderList')
+        list(24, 'finderFileList')
+    ] },
+    { id: 4, name: 'ST_OnlineApps_MyStripFinderFile', titleId: 13, title: 'File', components: [
+        label(51, 'finderFilePath'),
+        list(50, 'finderEntryList')
     ] },
     { id: 2, name: 'ST_OnlineApps_MyStripFinderDetail', titleId: 11, title: 'Entry', components: [
         label(30, 'finderDetailName'),

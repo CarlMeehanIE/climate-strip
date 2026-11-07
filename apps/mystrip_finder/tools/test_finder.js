@@ -145,34 +145,54 @@ async function until(pred, what) {
 
     // the matches: the catalogue's fields and method, the wheel, the streamed one; nothing from the unrelated files
     assert.ok(states.indexOf('map ST_OnlineApps_MyStripFinder') >= 0, 'entry state mapped');
-    const rows = writes.filter((w) => /^finderList\.\d+\.PrimaryText=/.test(w)).map((w) => w.split('=')[1]);
+    // the files: the catalogue first, each with its count
+    const fileRows = writes.filter((w) => /^finderFileList\.\d+\.PrimaryText=/.test(w)).map((w) => w.split('=')[1]);
+    console.log('files:', fileRows.join(' | '));
+    assert.ok(/^4 · .*someip-interfaces\.json$/.test(fileRows[0]), 'catalogue first with its count');
+    assert.ok(/^1 · .*big-catalogue\.fidl$/.test(fileRows[1]), 'the streamed file second');
+    assert.strictEqual(fileRows.length, 2, 'two files');
+    byName.finderFileList.emit('action', { row: 0 });
+    await tick(20);
+    assert.ok(states.indexOf('open ST_OnlineApps_MyStripFinderFile') >= 0, 'file page opened');
+    assert.ok(/someip-interfaces\.json · 4 entries/.test(last('finderFilePath.0.Text')), 'file page heading');
+    byName.finderFileList.emit('action', { row: 1 });
+    await tick(20);
+    const rows = writes.filter((w) => /^finder(Entry)List\.\d+\.PrimaryText=/.test(w)).map((w) => w.split('=')[1]);
     console.log('rows:', rows.join(' | '));
     ['statusSeatHeatingDR', 'statusSeatHeatingPS', 'setSeatHeatingLevel', 'SteeringWheelClimate', 'requestSteeringWheelHeating']
         .forEach((n) => assert.ok(rows.some((r) => r.indexOf(n) >= 0), `row for ${n}`));
     assert.strictEqual(new Set(rows).size, rows.length, 'no row twice');
     assert.ok(!rows.some((r) => /setTemperature|statusFanSpeed|hello/.test(r)), 'no unrelated rows');
     assert.ok(!writes.some((w) => /binary\.bin/.test(w)), 'unread file type left out');
-    assert.ok(/heating entries in \d+ files/.test(last('finderStatus.0.Text')), 'status line: ' + last('finderStatus.0.Text'));
+    assert.ok(/5 heating entries in 2 files \(3 read\)/.test(last('finderStatus.0.Text')), 'status line: ' + last('finderStatus.0.Text'));
+    assert.ok(!writes.some((w) => /FrequencyText/.test(w)), 'nothing in the second column');
 
     // interfaces by name
-    const ifaces = writes.filter((w) => /^finderIfaceList\.\d+\.FrequencyText=/.test(w)).map((w) => w.split('=')[1]);
+    const ifaces = writes.filter((w) => /^finderIfaceList\.\d+\.PrimaryText=/.test(w)).map((w) => w.split('=')[1]);
+    assert.ok(/Interfaces found \(3\)/.test(last('finderIfaces.0.PrimaryText')), 'interface count');
     console.log('interfaces:', ifaces.join(' | '));
     ['de.bmw.infotainment.climate.Climate', 'de.bmw.body.steeringwheelcomfort.SteeringWheelClimate',
         'de.bmw.infotainment.climate.Climate2'].forEach((i) => assert.ok(ifaces.indexOf(i) >= 0, `interface ${i}`));
     assert.ok(ifaces.indexOf('de.bmw.infotainment.vehicle.Vehicle2') < 0, 'vehicle interface left out');
 
-    // a row press opens the entry in full
-    const methodRow = rows.findIndex((r) => r === 'setSeatHeatingLevel');
-    byName.finderList.emit('action', { row: methodRow });
+    // back on the catalogue's page, a row press opens the entry in full
+    byName.finderFileList.emit('action', { row: 0 });
+    await tick(450);
+    byName.finderFileList.emit('action', { row: 0 });
+    await tick(20);
+    const methodRow = ['statusSeatHeatingDR', 'statusSeatHeatingPS', 'setSeatHeatingLevel', 'de.bmw.body.steeringwheelcomfort.SteeringWheelClimate']
+        .indexOf('setSeatHeatingLevel');
+    assert.strictEqual(last('finderEntryList.2.PrimaryText'), 'finderEntryList.2.PrimaryText=setSeatHeatingLevel');
+    byName.finderEntryList.emit('action', { row: methodRow });
     await tick(20);
     assert.ok(states.indexOf('open ST_OnlineApps_MyStripFinderDetail') >= 0, 'detail opened');
     assert.ok(/"name":"setSeatHeatingLevel"/.test(last('finderDetailText.0.Text')), 'detail shows the entry');
     assert.ok(/someip-interfaces\.json/.test(last('finderDetailWhere.0.Text')), 'detail shows the file');
 
     // the raw userEvent path for the same press within 400 ms counts once
-    const before = logged.filter((l) => /BUTTON ACTION finderList/.test(l)).length;
-    app.rhmiApplication.emit('userEvent', { eventType: 'ACTION', sourceId: byName.finderList.id, parameterMap: { 2: methodRow } });
-    assert.strictEqual(logged.filter((l) => /BUTTON ACTION finderList/.test(l)).length, before, 'press counted once');
+    const before = logged.filter((l) => /BUTTON ACTION finderEntryList/.test(l)).length;
+    app.rhmiApplication.emit('userEvent', { eventType: 'ACTION', sourceId: byName.finderEntryList.id, parameterMap: { 2: methodRow } });
+    assert.strictEqual(logged.filter((l) => /BUTTON ACTION finderEntryList/.test(l)).length, before, 'press counted once');
 
     // Save report to USB
     byName.finderSave.emit('action', {});

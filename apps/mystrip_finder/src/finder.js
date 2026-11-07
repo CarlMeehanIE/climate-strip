@@ -4,7 +4,8 @@
  * strip app can be written against the real names.
  *
  * On open it scans the read-only system folders (src/scan.js) and lists
- * each match: tap one for the full entry. Interfaces found lists the
+ * the files with matches, each with its count (the interface catalogue
+ * first): tap a file for its matches, a match for the full entry. Interfaces found lists the
  * climate, seat and steering-wheel interfaces by name. Save report to USB
  * writes everything to signal-finder-report.txt on a USB stick
  * (src/usb.js); a copy is kept in the app's own data folder.
@@ -34,6 +35,7 @@ const ROW_KEY = 2;                      // a press's row in a raw userEvent's pa
 
 const S = {
     main: 'ST_OnlineApps_MyStripFinder',
+    file: 'ST_OnlineApps_MyStripFinderFile',
     detail: 'ST_OnlineApps_MyStripFinderDetail',
     ifaces: 'ST_OnlineApps_MyStripFinderIfaces'
 };
@@ -42,14 +44,16 @@ const C = {
     scan: 'finderScan',
     save: 'finderSave',
     ifaces: 'finderIfaces',
-    list: 'finderList',
+    fileList: 'finderFileList',
+    filePath: 'finderFilePath',
+    entryList: 'finderEntryList',
     detailName: 'finderDetailName',
     detailWhere: 'finderDetailWhere',
     detailText: 'finderDetailText',
     ifaceList: 'finderIfaceList'
 };
 /* LT_ScrollLabel's cell; LT_Button_MediaEntry_1Row's two. */
-const LABELS = new Set([C.status, C.detailName, C.detailWhere, C.detailText]);
+const LABELS = new Set([C.status, C.filePath, C.detailName, C.detailWhere, C.detailText]);
 
 function isTrue(v) {
     return v === true || v === 1 || v === 'true' || v === '1';
@@ -57,6 +61,22 @@ function isTrue(v) {
 
 function plural(n, one, many) {
     return n + ' ' + (n === 1 ? one : many);
+}
+
+/* The matches by file: [{ file, matches }], files in a someip folder first,
+ * then by how many matches they have. */
+function byFile(matches) {
+    const groups = {};
+    const order = [];
+    matches.forEach((m) => {
+        if (!groups[m.file]) {
+            groups[m.file] = { file: m.file, matches: [] };
+            order.push(groups[m.file]);
+        }
+        groups[m.file].matches.push(m);
+    });
+    return order.sort((a, b) => (Number(/someip/i.test(b.file)) - Number(/someip/i.test(a.file))) ||
+        (b.matches.length - a.matches.length) || (a.file < b.file ? -1 : 1));
 }
 
 class Finder extends OnlineApp {
@@ -77,6 +97,8 @@ class Finder extends OnlineApp {
         this._progress = null;          // { phase, files, scanned, matches }
         this._lastProgress = 0;
         this._note = '';                // the outcome of Save report to USB
+        this._files = [];               // the last scan's matches by file (byFile)
+        this._file = null;              // the file shown on the File screen
         this._detail = null;            // the match shown on the Entry screen
 
         this.on('initialized', () => {
@@ -141,7 +163,8 @@ class Finder extends OnlineApp {
         this._bind(C.scan, () => this._startScan());
         this._bind(C.save, () => this._save());
         this._bind(C.ifaces, () => this._openState(S.ifaces));
-        this._bind(C.list, (row) => this._openDetail(row));
+        this._bind(C.fileList, (row) => this._openFile(row));
+        this._bind(C.entryList, (row) => this._openDetail(row));
         rhmi.on('userEvent', (ev) => {
             const entry = ev && ev.eventType === 'ACTION' && this._actionById[Number(ev.sourceId)];
             if (entry) {
@@ -205,6 +228,7 @@ class Finder extends OnlineApp {
         this._scanning = scan({ onProgress: (p) => this._onProgress(p) })
             .then((result) => {
                 this._result = result;
+                this._files = byFile(result.matches);
                 logger.info(`scan done: ${result.scanned} files read, ${result.matches.length} matches, ` +
                     `${result.interfaces.length} interfaces, ${result.ms} ms`);
                 return this._writeLocal();
@@ -212,6 +236,7 @@ class Finder extends OnlineApp {
             .catch((err) => {
                 logger.warn(`scan failed: ${err && err.message}`);
                 this._result = { files: 0, scanned: 0, matches: [], interfaces: [], ms: 0, error: String(err && err.message) };
+                this._files = [];
             })
             .then(() => {
                 this._scanning = null;
@@ -263,8 +288,18 @@ class Finder extends OnlineApp {
         });
     }
 
+    _openFile(row) {
+        const f = this._files[row];
+        if (!f) {
+            return;
+        }
+        this._file = f;
+        this._render();
+        this._openState(S.file);
+    }
+
     _openDetail(row) {
-        const m = this._result && this._result.matches[row];
+        const m = this._file && this._file.matches[row];
         if (!m) {
             return;
         }
@@ -365,10 +400,7 @@ class Finder extends OnlineApp {
                 });
             return;
         }
-        rows.forEach((r, i) => {
-            this._set(name, 'PrimaryText', r[0], i);
-            this._set(name, 'FrequencyText', r[1], i);
-        });
+        rows.forEach((text, i) => this._set(name, 'PrimaryText', text, i));
     }
 
     _statusLine() {
@@ -385,7 +417,8 @@ class Finder extends OnlineApp {
             return `Scan failed: ${r.error}`;
         }
         const head = r.matches.length ?
-            `${plural(r.matches.length, 'heating entry', 'heating entries')} in ${plural(r.scanned, 'file', 'files')}` :
+            `${plural(r.matches.length, 'heating entry', 'heating entries')} in ${plural(this._files.length, 'file', 'files')}` +
+                ` (${r.scanned} read)${r.full ? ', limit reached' : ''}` :
             `No heating entries found in ${plural(r.scanned, 'file', 'files')}`;
         return this._note ? `${head}. ${this._note}` : head;
     }
@@ -402,10 +435,13 @@ class Finder extends OnlineApp {
         const ifaces = (r && r.interfaces) || [];
         this._show(C.ifaces, ifaces.length > 0);
         if (ifaces.length) {
-            this._set(C.ifaces, 'FrequencyText', String(ifaces.length));
+            this._set(C.ifaces, 'PrimaryText', `Interfaces found (${ifaces.length})`);
         }
-        this._list(C.list, busy || !r ? [] : r.matches.map((m) => [m.name, path.basename(m.file)]));
-        this._list(C.ifaceList, ifaces.map((i) => [i.split('.').pop(), i]));
+        this._list(C.fileList, busy || !r ? [] : this._files.map((f) => `${f.matches.length} · ${f.file}`));
+        this._list(C.ifaceList, ifaces);
+        const f = this._file;
+        this._label(C.filePath, f ? `${f.file} · ${plural(f.matches.length, 'entry', 'entries')}` : '');
+        this._list(C.entryList, f ? f.matches.map((m) => m.name) : []);
         const d = this._detail;
         this._label(C.detailName, d ? d.name : '');
         this._label(C.detailWhere, d ? `${d.file} · ${d.path}` : '');
