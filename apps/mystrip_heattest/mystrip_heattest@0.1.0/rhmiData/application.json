@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "1.3.0",
+  "application": {
+    "uuid": "7ce79506-d170-4478-843d-907ee37f5ab3",
+    "type": "OnlineApp",
+    "name": "mystrip_heattest",
+    "vendor": "owner",
+    "version": "0.1.0",
+    "defaultLanguage": "en_GB",
+    "uiDescriptions": [
+      {
+        "applicationFilePath": "./uiDescriptions/ID8/application.xml",
+        "uiDescriptionFilePath": "./uiDescriptions/ID8/uiDescription.json",
+        "hmi": [
+          "ID8"
+        ]
+      }
+    ],
+    "stringBundleUuid": "7df5a064-b077-4410-8f80-b299a5e14f04",
+    "resourceBundleUuid": "687f70e0-f306-4e25-8bc9-850c94743bcc",
+    "variantGroups": [
+      {
+        "stringsPath": "./variantGroups/Common/texts",
+        "resourcesPath": "./variantGroups/Common/images",
+        "hmi": [
+          "ID8"
+        ],
+        "brands": [
+          "BMW"
+        ]
+      }
+    ],
+    "entryPoints": [
+      {
+        "name": "mystrip_heattest",
+        "uuid": "0b871715-bc8f-472c-8420-1aba83880275",
+        "textId": "SID_MYSTRIPHEATTEST_HEAT_TEST",
+        "icon": "mystrip_heattest_icon.png",
+        "insertionStateId": 20974,
+        "insertionFocusId": 2,
+        "insertionMode": "INSERT_BELOW",
+        "insertionOrder": 0,
+        "insertionPriority": 0,
+        "previewType": "NONE",
+        "bookmarkable": true,
+        "private": null,
+        "appearance": "DEFAULT",
+        "isGroupHeader": false,
+        "insertionGroup": 0
+      }
+    ]
+  }
+}

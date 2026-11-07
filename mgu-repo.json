@@ -44,6 +44,17 @@
       ],
       "title": "Heat Watch Master",
       "description": "Live log of the climate master interface's values (seat and steering wheel heating) while the heating buttons are pressed; read-only"
+    },
+    {
+      "id": "mystrip_heattest",
+      "kind": "app",
+      "path": "apps/mystrip_heattest",
+      "build": "unit",
+      "mguHmi": [
+        "ID8"
+      ],
+      "title": "Heat Test",
+      "description": "Buttons that each send one seat or steering wheel heating command by one route, with the car's answer and the live levels"
     }
   ]
 }

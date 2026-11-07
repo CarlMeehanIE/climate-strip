@@ -9,6 +9,7 @@ Personal apps for a BMW iDrive 8 head unit, installed through the
 | Heat Watch Seats | `mystrip_watchseat` | Read-only. A live log of every value that changes on `de.bmw.infotainment.climate.Climate` while the car's own seat heating buttons are pressed (newest first; start values marked "start"). **Clear log** empties it. |
 | Heat Watch Wheel | `mystrip_watchwheel` | The same for `de.bmw.body.steeringwheelcomfort.SteeringWheelClimate` and the steering wheel heating button. |
 | Heat Watch Master | `mystrip_watchmaster` | The same for `de.bmw.infotainment.climate.climatemaster.ClimateMaster` (seat and steering wheel heating). |
+| Heat Test | `mystrip_heattest` | **Sends commands**, one per button press: the driver's or passenger's seat to a level through `Climate.seatHeatingLamination` or `ClimateMaster.requestSeatClimateSeatHeating`, the steering wheel on / off through `SteeringWheelClimate.requestHeating` or to a level through `ClimateMaster.requestSteeringWheelHeating`. Logs what it sent and the car's answer, and shows the live levels. Built by `node tools/make_heattest.js`. |
 
 Each Heat Watch app names its interface in its manifest, and the head unit
 refuses an app whose interface its catalogue lacks, so they are separate
