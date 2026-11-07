@@ -55,6 +55,17 @@
       ],
       "title": "Heat Test",
       "description": "Buttons that each send one seat or steering wheel heating command by one route, with the car's answer and the live levels"
+    },
+    {
+      "id": "mystrip_climate",
+      "kind": "app",
+      "path": "apps/mystrip_climate",
+      "build": "unit",
+      "mguHmi": [
+        "ID8"
+      ],
+      "title": "Climate Strip",
+      "description": "Seat and steering wheel heating: your seat, the passenger seat and the wheel, with the levels the car reports"
     }
   ]
 }

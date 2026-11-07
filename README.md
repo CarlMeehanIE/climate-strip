@@ -5,6 +5,7 @@ Personal apps for a BMW iDrive 8 head unit, installed through the
 
 | App | Id | What it does |
 |---|---|---|
+| Climate Strip | `mystrip_climate` | Stage one: the seat and steering wheel heating as an ordinary app. Tap **Your seat (driver)** or **Passenger seat** to step that seat's heating up a stage (off after the highest), **Steering wheel** to turn it on or off. Each row shows the level the car reports (BMW's names: off, low, medium, high, very high) and the heater's stage. Seats are addressed as driver and passenger, so the driver's row is right on a right-hand-drive car. Built by `node tools/make_strip.js`. |
 | Signal Finder | `mystrip_finder` | Read-only. Reads the head unit's SOME/IP interface catalogue (`/etc/oap/someip/someip-interfaces.json`) and lists the interfaces with seat-heating or steering-wheel-heating parts. Tap an interface for its parts, each marked GET / SET / NOTIFY (fields), CALL (methods) or EVENT; tap a part for its data type spelled out and its raw catalogue entry. Sends nothing to the car. |
 | Heat Watch Seats | `mystrip_watchseat` | Read-only. A live log of every value that changes on `de.bmw.infotainment.climate.Climate` while the car's own seat heating buttons are pressed (newest first; start values marked "start"). **Clear log** empties it. |
 | Heat Watch Wheel | `mystrip_watchwheel` | The same for `de.bmw.body.steeringwheelcomfort.SteeringWheelClimate` and the steering wheel heating button. |

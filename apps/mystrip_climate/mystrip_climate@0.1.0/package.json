@@ -1,0 +1,40 @@
+{
+  "name": "mystrip_climate",
+  "version": "0.1.0",
+  "description": "Seat and steering wheel heating: your seat, the passenger seat and the wheel, with the levels the car reports",
+  "private": false,
+  "main": "javascript/runner.js",
+  "oapAppSettings": {
+    "maxDiskUsage": 10485760,
+    "cpuLimit": 30,
+    "memoryThresholdKB": 131072,
+    "priority": "PRIO_MEDIUM",
+    "visibility": "FOREGROUND",
+    "latencyClass": "FOREGROUND",
+    "loggingId": "MSCS",
+    "userLoginRequired": false,
+    "backgroundPriority": 150,
+    "someipManifest": "manifest.json"
+  },
+  "files": [
+    "config",
+    "rhmiData",
+    "package.json",
+    "npm-shrinkwrap.json",
+    "permissions.json",
+    "javascript",
+    "manifest.json"
+  ],
+  "dependencies": {
+    "oap-sdk": "24.10.2"
+  },
+  "engines": {
+    "node": ">=8.7.0"
+  },
+  "author": "owner",
+  "license": "GPL-3.0-or-later",
+  "mguLocalOnly": true,
+  "mguHmi": [
+    "ID8"
+  ]
+}
