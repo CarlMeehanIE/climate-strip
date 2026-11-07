@@ -2,10 +2,11 @@
 /**
  * Offline check of the Signal Finder against stand-ins: the oap-sdk
  * (OnlineApp, logging), the RHMI (components from the generated
- * uiDescription.json) and a made-up head unit folder holding a small JSON
- * catalogue, a large one (streamed) and unrelated files. Checks the scan,
- * the screens it fills, a row press, Save report to USB, and that nothing
- * outside the data folder and the stick is written.
+ * uiDescription.json) and made-up catalogues in the head unit's layout
+ * (interfaces with fields / methods / events, datatypes, instanceIDs).
+ * Checks which interfaces and parts are listed, what each allows, the types
+ * spelled out, the screens and presses, a missing catalogue, and that a
+ * catalogue of tens of MB is read quickly without parsing it whole.
  *
  *   node tools/gen_rhmi.js && node tools/test_finder.js
  */
@@ -19,47 +20,61 @@ const { ID8 } = require('./gen_rhmi.js');
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'finder-test-'));
 const APPDIR = path.join(ROOT, 'app', 'javascript');
-const ETC = path.join(ROOT, 'etc');
-const USB = path.join(ROOT, 'media');
 fs.mkdirSync(path.join(ROOT, 'app'));
 fs.mkdirSync(APPDIR);
-['finder.js', 'scan.js', 'usb.js'].forEach((n) => fs.copyFileSync(path.join(__dirname, '..', 'src', n), path.join(APPDIR, n)));
+['finder.js', 'catalog.js'].forEach((n) => fs.copyFileSync(path.join(__dirname, '..', 'src', n), path.join(APPDIR, n)));
+const catalog = require(path.join(APPDIR, 'catalog.js'));
 
-/* The made-up head unit. */
-fs.mkdirSync(path.join(ETC, 'oap', 'someip'), { recursive: true });
-fs.mkdirSync(path.join(ETC, 'other'), { recursive: true });
-const catalogue = {
+/* A made-up catalogue in the head unit's layout. */
+const CAT = {
+    version: '1',
     interfaces: {
         'de.bmw.infotainment.climate.Climate': {
+            serviceId: 4100,
             fields: {
-                statusSeatHeatingDR: { getter: 101, notifier: 102, setter: 0, type: 'SeatHeatingStatus' },
-                statusSeatHeatingPS: { getter: 103, notifier: 104, setter: 0, type: 'SeatHeatingStatus' },
-                statusFanSpeed: { getter: 105 }
+                statusSeatHeatingDR: { getter: { id: 1 }, notifier: { eventId: 2 }, dataRef: 'de.bmw.infotainment.climate.SeatHeatingStatus' },
+                statusSeatHeatingPS: { getter: { id: 3 }, notifier: { eventId: 4 }, setter: { id: 0 }, dataRef: 'de.bmw.infotainment.climate.SeatHeatingStatus' },
+                statusFanSpeed: { getter: { id: 5 }, dataRef: 'UInt8' }
             },
-            methods: [{ name: 'setSeatHeatingLevel', id: 7, in: [{ name: 'seat' }, { name: 'level' }] },
-                { name: 'setTemperature', id: 8 }]
+            methods: {
+                setSeatHeating: { id: 7, inArgs: [{ name: 'seat', dataRef: 'de.bmw.infotainment.climate.Seat' },
+                    { name: 'level', dataRef: 'de.bmw.infotainment.climate.SeatHeatingLevel' }] },
+                setTemperature: { id: 8, inArgs: [{ name: 't', dataRef: 'UInt8' }] }
+            }
         },
         'de.bmw.body.steeringwheelcomfort.SteeringWheelClimate': {
-            fields: { heatingState: { getter: 1, setter: 2 } }
+            serviceId: 5200,
+            fields: {
+                heatingState: { getter: { id: 1 }, setter: { id: 2 }, notifier: { eventId: 3 }, dataRef: 'de.bmw.body.OnOff' },
+                vibration: { getter: { id: 4 }, dataRef: 'UInt8' }
+            }
         },
-        'de.bmw.infotainment.vehicle.Vehicle2': { fields: { statusCarSpeed2: { getter: 1 } } }
-    }
+        'de.bmw.body.seatcomfort.SeatComfort': {
+            serviceId: 6300,
+            methods: { requestClimate: { id: 1, inArgs: [{ name: 'req', dataRef: 'de.bmw.body.seatcomfort.SeatHeatRequest' }] } },
+            events: { massageDone: { id: 2 } }
+        },
+        'de.bmw.infotainment.vehicle.Vehicle2': {
+            serviceId: 100,
+            fields: { statusCarSpeed2: { getter: { id: 1 }, dataRef: 'UInt16' } }
+        }
+    },
+    datatypes: {
+        'de.bmw.infotainment.climate.SeatHeatingStatus': { type: 'struct', extends: 'de.bmw.infotainment.climate.Base',
+            members: [{ name: 'level', dataRef: 'de.bmw.infotainment.climate.SeatHeatingLevel' }] },
+        'de.bmw.infotainment.climate.Base': { type: 'struct', members: [{ name: 'valid', dataRef: 'Boolean' }] },
+        'de.bmw.infotainment.climate.SeatHeatingLevel': { type: 'enum', items: { OFF: 0, LEVEL_1: 1, LEVEL_2: 2, LEVEL_3: 3 } },
+        'de.bmw.infotainment.climate.Seat': { type: 'enum', items: { DRIVER: 0, PASSENGER: 1 } },
+        'de.bmw.body.OnOff': { type: 'typedef', dataRef: 'de.bmw.body.OnOffEnum' },
+        'de.bmw.body.OnOffEnum': { type: 'enum', items: { OFF: 0, ON: 1 } },
+        'de.bmw.body.seatcomfort.SeatHeatRequest': { type: 'struct', members: [{ name: 'seat', dataRef: 'de.bmw.infotainment.climate.Seat' },
+            { name: 'levels', dataRef: 'de.bmw.body.seatcomfort.Levels' }] },
+        'de.bmw.body.seatcomfort.Levels': { type: 'array', elementDataRef: 'de.bmw.infotainment.climate.SeatHeatingLevel' }
+    },
+    instanceIDs: { 'de.bmw.infotainment.climate.Climate': ['1'], 'de.bmw.body.steeringwheelcomfort.SteeringWheelClimate': ['1'] }
 };
-fs.writeFileSync(path.join(ETC, 'oap', 'someip', 'someip-interfaces.json'), JSON.stringify(catalogue));
-fs.writeFileSync(path.join(ETC, 'other', 'unrelated.json'), JSON.stringify({ hello: 'world' }));
-fs.writeFileSync(path.join(ETC, 'other', 'binary.bin'), 'SeatHeating in a file type that is not read');
-// a big catalogue: streamed, with a match deep inside and one across a chunk boundary
-const pad = 'x'.repeat(1024 * 1024);
-const big = [];
-for (let i = 0; i < 8; i++) {
-    big.push(pad);
-}
-big.splice(4, 0, ' de.bmw.infotainment.climate.Climate2 requestSteeringWheelHeating(level) ');
-fs.writeFileSync(path.join(ETC, 'other', 'big-catalogue.fidl'), big.join(''));
-// a symlink loop is not followed
-fs.symlinkSync(ETC, path.join(ETC, 'other', 'loop'));
-// the stick: a mounted folder under media
-fs.mkdirSync(path.join(USB, 'usb0'), { recursive: true });
+const CAT_FILE = path.join(ROOT, 'someip-interfaces.json');
+fs.writeFileSync(CAT_FILE, JSON.stringify(CAT, null, 2));
 
 const writes = [];
 const states = [];
@@ -95,7 +110,7 @@ class OnlineApp extends EventEmitter {
         super();
         app = this;
         this.rhmiApplication = new Rhmi();
-        this.packageJson = { version: '0.1.0' };
+        this.packageJson = { version: 'test' };
         this.appDescription = { application: { entryPoints: [ENTRY] } };
         this.startReason = 'ENTRY_POINT';
     }
@@ -107,16 +122,11 @@ class OnlineApp extends EventEmitter {
 }
 const logged = [];
 const quiet = { info(l) { logged.push(String(l)); }, warn(l) { logged.push(String(l)); }, error(l) { logged.push(String(l)); } };
-
-/* scan.js and usb.js look in the made-up folders. */
-const realScan = require(path.join(APPDIR, 'scan.js'));
-const realUsb = require(path.join(APPDIR, 'usb.js'));
-realUsb.MOUNT_ROOTS.splice(0, realUsb.MOUNT_ROOTS.length, USB);
+let catFile = CAT_FILE;
 const stubs = {
     'oap-sdk/src/core/OnlineApp.js': OnlineApp,
     'oap-sdk/src/logging/logging': { getSDKLogger: () => quiet },
-    './scan.js': { scan: (o) => realScan.scan(Object.assign({}, o, { roots: [ETC] })), report: realScan.report },
-    './usb.js': realUsb
+    './catalog.js': { readCatalog: () => catalog.readCatalog({ file: catFile }) }
 };
 const load = Module._load;
 Module._load = function (req) {
@@ -126,9 +136,13 @@ require(path.join(APPDIR, 'finder.js'));
 Module._load = load;
 
 const tick = (ms) => new Promise((r) => setTimeout(r, ms || 0));
-const last = (prefix) => writes.filter((w) => w.indexOf(prefix) === 0).pop();
+const last = (prefix) => {
+    const w = writes.filter((x) => x.indexOf(prefix + '=') === 0).pop();
+    return w ? w.slice(prefix.length + 1) : undefined;
+};
+const rowsOf = (list) => writes.filter((w) => new RegExp(`^${list}\\.\\d+\\.PrimaryText=`).test(w)).map((w) => w.split('=').slice(1).join('='));
 async function until(pred, what) {
-    for (let i = 0; i < 400; i++) {
+    for (let i = 0; i < 500; i++) {
         if (pred()) {
             return;
         }
@@ -139,94 +153,102 @@ async function until(pred, what) {
 
 (async () => {
     app.emit('initialized');
-    await until(() => logged.some((l) => /scan done/.test(l)), 'the scan');
+    await until(() => logged.some((l) => /catalogue read:/.test(l)), 'the read');
     await tick(50);
-    console.log(logged.filter((l) => /scan done/.test(l))[0]);
-
-    // the matches: the catalogue's fields and method, the wheel, the streamed one; nothing from the unrelated files
+    console.log(logged.filter((l) => /catalogue read:/.test(l))[0]);
     assert.ok(states.indexOf('map ST_OnlineApps_MyStripFinder') >= 0, 'entry state mapped');
-    // the files: the catalogue first, each with its count
-    const fileRows = writes.filter((w) => /^finderFileList\.\d+\.PrimaryText=/.test(w)).map((w) => w.split('=')[1]);
-    console.log('files:', fileRows.join(' | '));
-    assert.ok(/^4 · .*someip-interfaces\.json$/.test(fileRows[0]), 'catalogue first with its count');
-    assert.ok(/^1 · .*big-catalogue\.fidl$/.test(fileRows[1]), 'the streamed file second');
-    assert.strictEqual(fileRows.length, 2, 'two files');
-    byName.finderFileList.emit('action', { row: 0 });
-    await tick(20);
-    assert.ok(states.indexOf('open ST_OnlineApps_MyStripFinderFile') >= 0, 'file page opened');
-    assert.ok(/someip-interfaces\.json · 4 entries/.test(last('finderFilePath.0.Text')), 'file page heading');
-    byName.finderFileList.emit('action', { row: 1 });
-    await tick(20);
-    const rows = writes.filter((w) => /^finder(Entry)List\.\d+\.PrimaryText=/.test(w)).map((w) => w.split('=')[1]);
-    console.log('rows:', rows.join(' | '));
-    ['statusSeatHeatingDR', 'statusSeatHeatingPS', 'setSeatHeatingLevel', 'SteeringWheelClimate', 'requestSteeringWheelHeating']
-        .forEach((n) => assert.ok(rows.some((r) => r.indexOf(n) >= 0), `row for ${n}`));
-    assert.strictEqual(new Set(rows).size, rows.length, 'no row twice');
-    assert.ok(!rows.some((r) => /setTemperature|statusFanSpeed|hello/.test(r)), 'no unrelated rows');
-    assert.ok(!writes.some((w) => /binary\.bin/.test(w)), 'unread file type left out');
-    assert.ok(/5 heating entries in 2 files \(3 read\)/.test(last('finderStatus.0.Text')), 'status line: ' + last('finderStatus.0.Text'));
+
+    // the interfaces with heating parts; the vehicle one left out
+    const ifaces = rowsOf('finderIfaceList');
+    console.log('interfaces:', ifaces.join(' | '));
+    assert.deepStrictEqual(ifaces, ['3 parts · de.bmw.infotainment.climate.Climate',
+        '2 parts · de.bmw.body.steeringwheelcomfort.SteeringWheelClimate', '1 part · de.bmw.body.seatcomfort.SeatComfort']);
+    assert.strictEqual(last('finderStatus.0.Text'), '3 interfaces with heating parts (6 parts), of 4 in the catalogue');
     assert.ok(!writes.some((w) => /FrequencyText/.test(w)), 'nothing in the second column');
 
-    // interfaces by name
-    const ifaces = writes.filter((w) => /^finderIfaceList\.\d+\.PrimaryText=/.test(w)).map((w) => w.split('=')[1]);
-    assert.ok(/Interfaces found \(3\)/.test(last('finderIfaces.0.PrimaryText')), 'interface count');
-    console.log('interfaces:', ifaces.join(' | '));
-    ['de.bmw.infotainment.climate.Climate', 'de.bmw.body.steeringwheelcomfort.SteeringWheelClimate',
-        'de.bmw.infotainment.climate.Climate2'].forEach((i) => assert.ok(ifaces.indexOf(i) >= 0, `interface ${i}`));
-    assert.ok(ifaces.indexOf('de.bmw.infotainment.vehicle.Vehicle2') < 0, 'vehicle interface left out');
+    // Climate: the seat fields and the seat method, not the fan or temperature; setter id 0 is no setter
+    byName.finderIfaceList.emit('action', { row: 0 });
+    await tick(20);
+    assert.ok(states.indexOf('open ST_OnlineApps_MyStripFinderIface') >= 0, 'interface page opened');
+    assert.strictEqual(last('finderIfaceHead.0.Text'), 'de.bmw.infotainment.climate.Climate · service 4100 · instance ["1"]');
+    let members = rowsOf('finderMemberList');
+    console.log('Climate parts:', members.join(' | '));
+    assert.deepStrictEqual(members, ['GET+NOTIFY · statusSeatHeatingDR', 'GET+NOTIFY · statusSeatHeatingPS', 'CALL · setSeatHeating']);
 
-    // back on the catalogue's page, a row press opens the entry in full
-    byName.finderFileList.emit('action', { row: 0 });
+    // a part in full: its arguments and their types spelled out
+    byName.finderMemberList.emit('action', { row: 2 });
+    await tick(20);
+    assert.ok(states.indexOf('open ST_OnlineApps_MyStripFinderDetail') >= 0, 'part page opened');
+    assert.strictEqual(last('finderDetailName.0.Text'), 'setSeatHeating');
+    assert.strictEqual(last('finderDetailKind.0.Text'), 'method · CALL');
+    assert.strictEqual(last('finderDetailType.0.Text'),
+        'inArgs: seat: Seat enum(DRIVER=0, PASSENGER=1), level: SeatHeatingLevel enum(OFF=0, LEVEL_1=1, LEVEL_2=2, LEVEL_3=3)');
+    assert.ok(/"id":7/.test(last('finderDetailRaw.0.Text')), 'raw entry');
+
+    // a struct with its parent's members
+    byName.finderMemberList.emit('action', { row: 0 });
+    await tick(20);
+    assert.strictEqual(last('finderDetailType.0.Text'),
+        'SeatHeatingStatus {valid: Boolean, level: SeatHeatingLevel enum(OFF=0, LEVEL_1=1, LEVEL_2=2, LEVEL_3=3)}');
+
+    // the steering wheel interface is about heating by its name: every part listed, the typedef followed
+    byName.finderIfaceList.emit('action', { row: 1 });
+    await tick(20);
+    members = rowsOf('finderMemberList').slice(-2);
+    assert.deepStrictEqual(members, ['GET+SET+NOTIFY · heatingState', 'GET · vibration']);
+    await tick(450);                    // past the double-press guard for row 0
+    byName.finderMemberList.emit('action', { row: 0 });
+    await tick(20);
+    assert.strictEqual(last('finderDetailType.0.Text'), 'OnOffEnum enum(OFF=0, ON=1)');
+
+    // a request that is about heating only through its types; the unrelated event left out
+    byName.finderIfaceList.emit('action', { row: 2 });
+    await tick(20);
+    assert.deepStrictEqual(rowsOf('finderMemberList').slice(-1), ['CALL · requestClimate']);
     await tick(450);
-    byName.finderFileList.emit('action', { row: 0 });
+    byName.finderMemberList.emit('action', { row: 0 });
     await tick(20);
-    const methodRow = ['statusSeatHeatingDR', 'statusSeatHeatingPS', 'setSeatHeatingLevel', 'de.bmw.body.steeringwheelcomfort.SteeringWheelClimate']
-        .indexOf('setSeatHeatingLevel');
-    assert.strictEqual(last('finderEntryList.2.PrimaryText'), 'finderEntryList.2.PrimaryText=setSeatHeatingLevel');
-    byName.finderEntryList.emit('action', { row: methodRow });
-    await tick(20);
-    assert.ok(states.indexOf('open ST_OnlineApps_MyStripFinderDetail') >= 0, 'detail opened');
-    assert.ok(/"name":"setSeatHeatingLevel"/.test(last('finderDetailText.0.Text')), 'detail shows the entry');
-    assert.ok(/someip-interfaces\.json/.test(last('finderDetailWhere.0.Text')), 'detail shows the file');
+    assert.ok(/levels: \[SeatHeatingLevel enum/.test(last('finderDetailType.0.Text')), 'array of an enum');
 
-    // the raw userEvent path for the same press within 400 ms counts once
-    const before = logged.filter((l) => /BUTTON ACTION finderEntryList/.test(l)).length;
-    app.rhmiApplication.emit('userEvent', { eventType: 'ACTION', sourceId: byName.finderEntryList.id, parameterMap: { 2: methodRow } });
-    assert.strictEqual(logged.filter((l) => /BUTTON ACTION finderEntryList/.test(l)).length, before, 'press counted once');
+    // the raw userEvent path for a press already counted within 400 ms counts once
+    const before = logged.filter((l) => /BUTTON ACTION finderMemberList/.test(l)).length;
+    app.rhmiApplication.emit('userEvent', { eventType: 'ACTION', sourceId: byName.finderMemberList.id, parameterMap: { 2: 0 } });
+    assert.strictEqual(logged.filter((l) => /BUTTON ACTION finderMemberList/.test(l)).length, before, 'press counted once');
 
-    // Save report to USB
-    byName.finderSave.emit('action', {});
-    await until(() => /Saved to/.test(last('finderStatus.0.Text') || ''), 'the save');
-    const onStick = path.join(USB, 'usb0', 'signal-finder-report.txt');
-    const text = fs.readFileSync(onStick, 'utf8');
-    assert.ok(/== Heating entries ==/.test(text) && /setSeatHeatingLevel/.test(text) && /SteeringWheelClimate/.test(text), 'report content');
-    assert.ok(fs.existsSync(path.join(ROOT, 'data', 'signal-finder-report.txt')), 'local copy in the data folder');
+    // no catalogue
+    catFile = path.join(ROOT, 'missing.json');
+    byName.finderRead.emit('action', {});
+    await until(() => /Could not read the catalogue: catalogue not found/.test(last('finderStatus.0.Text') || ''), 'missing catalogue');
+    assert.strictEqual(last('finderIfaceList.rows'), '0', 'list emptied');
 
-    // nothing else written: the made-up system folder is as it was
-    const etcFiles = [];
-    (function walk(d) {
-        fs.readdirSync(d).forEach((n) => {
-            const f = path.join(d, n);
-            const st = fs.lstatSync(f);
-            if (st.isDirectory()) { walk(f); } else { etcFiles.push(path.relative(ETC, f)); }
-        });
-    })(ETC);
-    assert.deepStrictEqual(etcFiles.sort(), ['oap/someip/someip-interfaces.json', 'other/big-catalogue.fidl', 'other/binary.bin',
-        'other/loop', 'other/unrelated.json'].sort(), 'system folder untouched');
+    // a catalogue of tens of MB: thousands of interfaces and types, a few about heating
+    const big = { interfaces: {}, datatypes: Object.assign({}, CAT.datatypes), instanceIDs: {} };
+    for (let i = 0; i < 6000; i++) {
+        big.interfaces[`de.bmw.filler.Interface${i}`] = { serviceId: i, fields: {}, methods: {} };
+        for (let f = 0; f < 20; f++) {
+            big.interfaces[`de.bmw.filler.Interface${i}`].fields[`statusValue${f}`] = { getter: { id: f }, dataRef: `de.bmw.filler.T${i % 500}` };
+        }
+        big.interfaces[`de.bmw.filler.Interface${i}`].methods.doThing = { id: 1, inArgs: [{ name: 'a "quoted" \\ value', dataRef: 'UInt8' }] };
+    }
+    for (let t = 0; t < 4000; t++) {
+        big.datatypes[`de.bmw.filler.T${t}`] = { type: 'struct', members: [{ name: 'x', dataRef: 'UInt8' }, { name: 'y', dataRef: 'UInt8' }] };
+    }
+    Object.assign(big.interfaces, CAT.interfaces);
+    const BIG_FILE = path.join(ROOT, 'big.json');
+    fs.writeFileSync(BIG_FILE, JSON.stringify(big, null, 1));
+    const bytes = fs.statSync(BIG_FILE).size;
+    const heapBefore = process.memoryUsage().heapUsed;
+    const t0 = Date.now();
+    const r = await catalog.readCatalog({ file: BIG_FILE });
+    const took = Date.now() - t0;
+    const heapGrew = Math.round((process.memoryUsage().heapUsed - heapBefore) / 1e6);
+    console.log(`big catalogue: ${Math.round(bytes / 1e6)} MB, ${r.total} interfaces, ${r.interfaces.length} with heating, ${took} ms, heap +${heapGrew} MB`);
+    assert.ok(!r.error, r.error);
+    assert.strictEqual(r.total, 6004);
+    assert.deepStrictEqual(r.interfaces.map((i) => i.name), Object.keys(CAT.interfaces).slice(0, 3));
+    assert.ok(took < 10000, 'read in under 10 s here');
 
-    // no stick
-    fs.rmSync(path.join(USB, 'usb0'), { recursive: true });
-    await tick(450);                    // past the double-press guard
-    byName.finderSave.emit('action', {});
-    await until(() => /No USB stick found/.test(last('finderStatus.0.Text') || ''), 'no stick');
-
-    // Scan again
-    const scans = logged.filter((l) => /scan started/.test(l)).length;
-    byName.finderScan.emit('action', {});
-    await until(() => logged.filter((l) => /scan done/.test(l)).length === 2, 'the second scan');
-    assert.strictEqual(logged.filter((l) => /scan started/.test(l)).length, scans + 1);
-
-    const warns = logged.filter((l) => /fail|MISS/i.test(l) && !/save to USB: failed/.test(l));
+    const warns = logged.filter((l) => /fail|MISS/i.test(l));
     assert.deepStrictEqual(warns, [], 'no warnings');
     console.log('Signal Finder checks passed');
     process.exit(0);

@@ -1,59 +1,49 @@
 /**
- * finder - Signal Finder: shows which seat-heating and steering-wheel-heating
- * entries this head unit's SOME/IP interface catalogue has, so a climate
- * strip app can be written against the real names.
+ * finder - Signal Finder: shows the seat-heating and steering-wheel-heating
+ * parts of this head unit's SOME/IP interface catalogue, so a climate strip
+ * app can be written against the real names.
  *
- * On open it scans the read-only system folders (src/scan.js) and lists
- * the files with matches, each with its count (the interface catalogue
- * first): tap a file for its matches, a match for the full entry. Interfaces found lists the
- * climate, seat and steering-wheel interfaces by name. Save report to USB
- * writes everything to signal-finder-report.txt on a USB stick
- * (src/usb.js); a copy is kept in the app's own data folder.
+ * On open it reads /etc/oap/someip/someip-interfaces.json (src/catalog.js)
+ * and lists the interfaces that have heating parts. Tap one for its parts
+ * (each marked with what it allows: GET, SET, NOTIFY for a field, CALL for
+ * a method, EVENT), and a part for its data type spelled out and its raw
+ * catalogue entry.
  *
- * Read-only towards the car: it reads files and sends no vehicle commands.
+ * Read-only towards the car: it reads one file and sends no vehicle commands.
  *
  * The app's structure (OnlineApp, the RHMI states, presses, entry point,
  * visibility) follows the MGU Store's src/store.js
  * (robertnisipeanu/mgu-store, GPL-3.0). Node 8 compatible.
  */
 'use strict';
-const fs = require('fs');
-const path = require('path');
 const OnlineApp = require('oap-sdk/src/core/OnlineApp.js');
 const logging = require('oap-sdk/src/logging/logging');
-const { scan, report } = require('./scan.js');
-const { saveToUsb } = require('./usb.js');
+const { readCatalog } = require('./catalog.js');
 
 const logger = logging.getSDKLogger();
 
-const REPORT_NAME = 'signal-finder-report.txt';
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
 const PRESS_DEDUPE_MS = 400;
 const HIDE_SETTLE_MS = 800;
-const PROGRESS_MS = 700;
 const ROW_KEY = 2;                      // a press's row in a raw userEvent's parameterMap
 
 const S = {
     main: 'ST_OnlineApps_MyStripFinder',
-    file: 'ST_OnlineApps_MyStripFinderFile',
-    detail: 'ST_OnlineApps_MyStripFinderDetail',
-    ifaces: 'ST_OnlineApps_MyStripFinderIfaces'
+    iface: 'ST_OnlineApps_MyStripFinderIface',
+    detail: 'ST_OnlineApps_MyStripFinderDetail'
 };
 const C = {
     status: 'finderStatus',
-    scan: 'finderScan',
-    save: 'finderSave',
-    ifaces: 'finderIfaces',
-    fileList: 'finderFileList',
-    filePath: 'finderFilePath',
-    entryList: 'finderEntryList',
+    read: 'finderRead',
+    ifaceList: 'finderIfaceList',
+    ifaceHead: 'finderIfaceHead',
+    memberList: 'finderMemberList',
     detailName: 'finderDetailName',
-    detailWhere: 'finderDetailWhere',
-    detailText: 'finderDetailText',
-    ifaceList: 'finderIfaceList'
+    detailKind: 'finderDetailKind',
+    detailType: 'finderDetailType',
+    detailRaw: 'finderDetailRaw'
 };
-/* LT_ScrollLabel's cell; LT_Button_MediaEntry_1Row's two. */
-const LABELS = new Set([C.status, C.filePath, C.detailName, C.detailWhere, C.detailText]);
+/* LT_ScrollLabel's cell is Text; LT_Button_MediaEntry_1Row's first line PrimaryText. */
+const LABELS = new Set([C.status, C.ifaceHead, C.detailName, C.detailKind, C.detailType, C.detailRaw]);
 
 function isTrue(v) {
     return v === true || v === 1 || v === 'true' || v === '1';
@@ -63,20 +53,9 @@ function plural(n, one, many) {
     return n + ' ' + (n === 1 ? one : many);
 }
 
-/* The matches by file: [{ file, matches }], files in a someip folder first,
- * then by how many matches they have. */
-function byFile(matches) {
-    const groups = {};
-    const order = [];
-    matches.forEach((m) => {
-        if (!groups[m.file]) {
-            groups[m.file] = { file: m.file, matches: [] };
-            order.push(groups[m.file]);
-        }
-        groups[m.file].matches.push(m);
-    });
-    return order.sort((a, b) => (Number(/someip/i.test(b.file)) - Number(/someip/i.test(a.file))) ||
-        (b.matches.length - a.matches.length) || (a.file < b.file ? -1 : 1));
+/* What a part allows, in capitals, ahead of its name in the lists. */
+function tag(m) {
+    return m.flags.toUpperCase().replace(/ /g, '+');
 }
 
 class Finder extends OnlineApp {
@@ -92,14 +71,10 @@ class Finder extends OnlineApp {
         this._visible = false;
         this._hideTimer = null;
         this._shutdownPromise = null;
-        this._result = null;            // the last scan's result
-        this._scanning = null;          // the running scan's promise
-        this._progress = null;          // { phase, files, scanned, matches }
-        this._lastProgress = 0;
-        this._note = '';                // the outcome of Save report to USB
-        this._files = [];               // the last scan's matches by file (byFile)
-        this._file = null;              // the file shown on the File screen
-        this._detail = null;            // the match shown on the Entry screen
+        this._result = null;            // the last read's result (readCatalog)
+        this._reading = null;           // the running read's promise
+        this._iface = null;             // the interface shown on the Interface screen
+        this._detail = null;            // the part shown on the Part screen
 
         this.on('initialized', () => {
             this._appInitialized().catch((err) => logger.error(`finder init failed: ${err && err.message}`));
@@ -160,11 +135,9 @@ class Finder extends OnlineApp {
                 logger.warn(`BIND MISS: ${C[k]} not found in uiDescription`);
             }
         });
-        this._bind(C.scan, () => this._startScan());
-        this._bind(C.save, () => this._save());
-        this._bind(C.ifaces, () => this._openState(S.ifaces));
-        this._bind(C.fileList, (row) => this._openFile(row));
-        this._bind(C.entryList, (row) => this._openDetail(row));
+        this._bind(C.read, () => this._startRead());
+        this._bind(C.ifaceList, (row) => this._openIface(row));
+        this._bind(C.memberList, (row) => this._openDetail(row));
         rhmi.on('userEvent', (ev) => {
             const entry = ev && ev.eventType === 'ACTION' && this._actionById[Number(ev.sourceId)];
             if (entry) {
@@ -217,89 +190,40 @@ class Finder extends OnlineApp {
 
     /* ---- actions ---- */
 
-    _startScan() {
-        if (this._scanning) {
-            return this._scanning;
+    _startRead() {
+        if (this._reading) {
+            return this._reading;
         }
-        this._note = '';
-        this._progress = { phase: 'listing', files: 0 };
         this._render();
-        logger.info('scan started');
-        this._scanning = scan({ onProgress: (p) => this._onProgress(p) })
+        logger.info('catalogue read started');
+        this._reading = readCatalog()
             .then((result) => {
                 this._result = result;
-                this._files = byFile(result.matches);
-                logger.info(`scan done: ${result.scanned} files read, ${result.matches.length} matches, ` +
-                    `${result.interfaces.length} interfaces, ${result.ms} ms`);
-                return this._writeLocal();
+                logger.info(`catalogue read: ${result.bytes} bytes, ${result.total} interfaces, ` +
+                    `${result.interfaces.length} with heating parts, ${result.ms} ms${result.error ? ', error ' + result.error : ''}`);
             })
             .catch((err) => {
-                logger.warn(`scan failed: ${err && err.message}`);
-                this._result = { files: 0, scanned: 0, matches: [], interfaces: [], ms: 0, error: String(err && err.message) };
-                this._files = [];
+                this._result = { interfaces: [], total: 0, bytes: 0, ms: 0, error: String(err && err.message) };
             })
             .then(() => {
-                this._scanning = null;
-                this._progress = null;
+                this._reading = null;
                 this._render();
             });
-        return this._scanning;
+        return this._reading;
     }
 
-    _onProgress(p) {
-        this._progress = p;
-        const now = Date.now();
-        if (now - this._lastProgress >= PROGRESS_MS) {
-            this._lastProgress = now;
-            this._render();
-        }
-    }
-
-    _reportText() {
-        const pkg = this.packageJson || this._packageJson || {};
-        return report(this._result, { App: `${this.getAppId()} ${pkg.version || ''}`.trim() });
-    }
-
-    /* A copy in the app's own data folder. */
-    _writeLocal() {
-        return new Promise((resolve) => {
-            fs.mkdir(DATA_DIR, () => fs.writeFile(path.join(DATA_DIR, REPORT_NAME), this._reportText(), 'utf8', (err) => {
-                if (err) {
-                    logger.warn(`report not written to ${DATA_DIR}: ${err.message}`);
-                }
-                resolve();
-            }));
-        });
-    }
-
-    _save() {
-        if (!this._result || this._scanning) {
-            this._note = 'Wait for the scan to finish';
-            this._render();
-            return Promise.resolve();
-        }
-        this._note = 'Saving…';
-        this._render();
-        return saveToUsb(REPORT_NAME, this._reportText()).then((r) => {
-            this._note = r.ok ? `Saved to ${r.where}` :
-                (r.tried.length ? 'Could not write to the USB stick' : 'No USB stick found');
-            logger.info(`save to USB: ${r.ok ? r.where : 'failed'} (tried ${r.tried.join(', ') || 'none'})`);
-            this._render();
-        });
-    }
-
-    _openFile(row) {
-        const f = this._files[row];
-        if (!f) {
+    _openIface(row) {
+        const i = this._result && this._result.interfaces[row];
+        if (!i) {
             return;
         }
-        this._file = f;
+        this._iface = i;
         this._render();
-        this._openState(S.file);
+        this._openState(S.iface);
     }
 
     _openDetail(row) {
-        const m = this._file && this._file.matches[row];
+        const m = this._iface && this._iface.members[row];
         if (!m) {
             return;
         }
@@ -404,23 +328,21 @@ class Finder extends OnlineApp {
     }
 
     _statusLine() {
-        const p = this._progress;
-        if (p) {
-            return p.phase === 'listing' ? `Looking for files… ${p.files} found` :
-                `Reading files… ${p.scanned} of ${p.files}, ${plural(p.matches || 0, 'match', 'matches')}`;
+        if (this._reading) {
+            return 'Reading the catalogue…';
         }
         const r = this._result;
         if (!r) {
             return 'Starting';
         }
         if (r.error) {
-            return `Scan failed: ${r.error}`;
+            return `Could not read the catalogue: ${r.error}`;
         }
-        const head = r.matches.length ?
-            `${plural(r.matches.length, 'heating entry', 'heating entries')} in ${plural(this._files.length, 'file', 'files')}` +
-                ` (${r.scanned} read)${r.full ? ', limit reached' : ''}` :
-            `No heating entries found in ${plural(r.scanned, 'file', 'files')}`;
-        return this._note ? `${head}. ${this._note}` : head;
+        const parts = r.interfaces.reduce((n, i) => n + i.members.length, 0);
+        return r.interfaces.length ?
+            `${plural(r.interfaces.length, 'interface', 'interfaces')} with heating parts (${parts} parts), ` +
+                `of ${r.total} in the catalogue` :
+            `No heating parts among the ${r.total} interfaces in the catalogue`;
     }
 
     _render() {
@@ -428,24 +350,18 @@ class Finder extends OnlineApp {
             return;
         }
         const r = this._result;
-        const busy = !!this._scanning;
         this._label(C.status, this._statusLine());
-        this._show(C.scan, !busy);
-        this._show(C.save, !busy && !!r);
-        const ifaces = (r && r.interfaces) || [];
-        this._show(C.ifaces, ifaces.length > 0);
-        if (ifaces.length) {
-            this._set(C.ifaces, 'PrimaryText', `Interfaces found (${ifaces.length})`);
-        }
-        this._list(C.fileList, busy || !r ? [] : this._files.map((f) => `${f.matches.length} · ${f.file}`));
-        this._list(C.ifaceList, ifaces);
-        const f = this._file;
-        this._label(C.filePath, f ? `${f.file} · ${plural(f.matches.length, 'entry', 'entries')}` : '');
-        this._list(C.entryList, f ? f.matches.map((m) => m.name) : []);
+        this._show(C.read, !this._reading);
+        this._list(C.ifaceList, this._reading || !r ? [] :
+            r.interfaces.map((i) => `${plural(i.members.length, 'part', 'parts')} · ${i.name}`));
+        const i = this._iface;
+        this._label(C.ifaceHead, i ? `${i.name} · service ${i.serviceId} · instance ${JSON.stringify(i.instance)}` : '');
+        this._list(C.memberList, i ? i.members.map((m) => `${tag(m)} · ${m.name}`) : []);
         const d = this._detail;
         this._label(C.detailName, d ? d.name : '');
-        this._label(C.detailWhere, d ? `${d.file} · ${d.path}` : '');
-        this._label(C.detailText, d ? d.text : '');
+        this._label(C.detailKind, d ? `${d.kind} · ${tag(d)}` : '');
+        this._label(C.detailType, d ? d.type : '');
+        this._label(C.detailRaw, d ? d.raw : '');
     }
 
     _setVisible(visible) {
@@ -458,8 +374,8 @@ class Finder extends OnlineApp {
         if (visible) {
             this._written = {};
             this._render();
-            if (!this._result && !this._scanning) {
-                this._startScan();
+            if (!this._result && !this._reading) {
+                this._startRead();
             }
         }
         if (!this._initialized || !this._appStatusService) {

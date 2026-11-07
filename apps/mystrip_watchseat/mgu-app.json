@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "mystrip_watchseat",
+  "version": "0.1.0",
+  "tree": "mystrip_watchseat@0.1.0",
+  "modules": [
+    "src/watch.js",
+    "src/iface.js",
+    "src/catalog.js",
+    "src/target.js"
+  ],
+  "sdk": [
+    "oap-sdk/src/core/OnlineApp.js",
+    "oap-sdk/src/logging/logging",
+    "oap-sdk/src/someip/someipBuilders"
+  ]
+}

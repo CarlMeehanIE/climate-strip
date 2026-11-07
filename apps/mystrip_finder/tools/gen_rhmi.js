@@ -8,12 +8,11 @@
  *
  * Screens (LT_State_Wide_List, rows LT_Button_MediaEntry_1Row, labels
  * LT_ScrollLabel):
- *   1  ST_OnlineApps_MyStripFinder        status, Scan again, Save report to
- *                                         USB, Interfaces found, the files
- *                                         with matches (count and path)
- *   4  ST_OnlineApps_MyStripFinderFile    one file's matches
- *   2  ST_OnlineApps_MyStripFinderDetail  one match in full
- *   3  ST_OnlineApps_MyStripFinderIfaces  the climate / seat / wheel interfaces
+ *   1  ST_OnlineApps_MyStripFinder        status, Read again, the catalogue's
+ *                                         interfaces with heating parts
+ *   4  ST_OnlineApps_MyStripFinderIface   one interface: its heating parts
+ *   2  ST_OnlineApps_MyStripFinderDetail  one part in full: kind, what it
+ *                                         allows, its type, the raw entry
  *
  * A row's words all go in its first line (PrimaryText): iDrive 8 shows no
  * second column in these rows.
@@ -62,22 +61,18 @@ const TITLE = 'Signal Finder';
 const STATES = [
     { id: 1, name: 'ST_OnlineApps_MyStripFinder', titleId: 10, title: TITLE, components: [
         label(20, 'finderStatus', 'Starting'),
-        button(21, 'finderScan', 'Scan again'),
-        button(22, 'finderSave', 'Save report to USB'),
-        row(23, 'finderIfaces', 'Interfaces found'),
-        list(24, 'finderFileList')
+        button(21, 'finderRead', 'Read again'),
+        list(24, 'finderIfaceList')
     ] },
-    { id: 4, name: 'ST_OnlineApps_MyStripFinderFile', titleId: 13, title: 'File', components: [
-        label(51, 'finderFilePath'),
-        list(50, 'finderEntryList')
+    { id: 4, name: 'ST_OnlineApps_MyStripFinderIface', titleId: 13, title: 'Interface', components: [
+        label(51, 'finderIfaceHead'),
+        list(50, 'finderMemberList')
     ] },
-    { id: 2, name: 'ST_OnlineApps_MyStripFinderDetail', titleId: 11, title: 'Entry', components: [
+    { id: 2, name: 'ST_OnlineApps_MyStripFinderDetail', titleId: 11, title: 'Part', components: [
         label(30, 'finderDetailName'),
-        label(31, 'finderDetailWhere'),
-        label(32, 'finderDetailText')
-    ] },
-    { id: 3, name: 'ST_OnlineApps_MyStripFinderIfaces', titleId: 12, title: 'Interfaces found', components: [
-        list(40, 'finderIfaceList')
+        label(31, 'finderDetailKind'),
+        label(32, 'finderDetailType'),
+        label(33, 'finderDetailRaw')
     ] }
 ];
 
