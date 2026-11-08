@@ -110,7 +110,11 @@ class OnlineApp extends EventEmitter {
 const car = { dr: 0, ps: 2, autoDr: 'STUFE_0', autoPs: 'STUFE_3', wheel: false, fail: false };
 const sent = [];
 const subs = {};
-const aura = () => ({ statusSeatHeaterAUTODriver: car.autoDr, statusSeatHeaterAUTOPassenger: car.autoPs, other: 7 });
+/* As the car's proxy hands it over: an object whose members (and enum
+ * values) only show their names when written out as JSON. */
+const wrapped = (o) => { const w = { _m: o }; Object.defineProperty(w, 'toJSON', { value: () => o }); return w; };
+const en = (name) => ({ _v: Number(name.replace('STUFE_', '')), toJSON: () => name });
+const aura = () => wrapped({ statusSeatHeaterAUTODriver: en(car.autoDr), statusSeatHeaterAUTOPassenger: en(car.autoPs), other: 7 });
 function notify() {
     if (subs.statusSeatHeatingDR) { subs.statusSeatHeatingDR({ statusSeatHeaterDR: car.dr }); }
     if (subs.statusSeatHeatingPS) { subs.statusSeatHeatingPS({ statusSeatHeaterPS: car.ps }); }

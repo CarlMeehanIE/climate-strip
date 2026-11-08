@@ -86,6 +86,20 @@ function within(p, ms, what) {
     });
 }
 
+/* A value from the car as plain data: the proxies hand some (structs, enum
+ * values) over as objects that only show their members and names when
+ * written out as JSON, the way Heat Watch prints them. */
+function plain(v) {
+    if (!v || typeof v !== 'object') {
+        return v;
+    }
+    try {
+        return JSON.parse(JSON.stringify(v));
+    } catch (e) {
+        return v;
+    }
+}
+
 /* STUFE_<n> or n -> n; anything else -> null. */
 function stufe(v) {
     if (typeof v === 'number') {
@@ -441,10 +455,10 @@ class ClimateStrip extends OnlineApp {
                 }
                 const pr = [];
                 if (typeof a.subscribe === 'function') {
-                    pr.push(a.subscribe((v) => { fn(v); this._changed(); }));
+                    pr.push(a.subscribe((v) => { fn(plain(v)); this._changed(); }));
                 }
                 if (typeof a.getValue === 'function') {
-                    pr.push(Promise.resolve(a.getValue()).then((v) => { fn(v); this._changed(); }));
+                    pr.push(Promise.resolve(a.getValue()).then((v) => { fn(plain(v)); this._changed(); }));
                 }
                 return Promise.all(pr);
             })
