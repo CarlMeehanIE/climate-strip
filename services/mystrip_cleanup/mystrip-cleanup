@@ -1,0 +1,93 @@
+#!/usr/bin/node
+/**
+ * mystrip-cleanup - takes Climate Bar's name (mystrip-bar, and the
+ * mystrip_bar it never installed as) out of overlay_apps in the Store
+ * Renderer's settings file (/var/opt/mgu-render/mgu-render.local.conf), with
+ * the comment line Climate Bar wrote above it, and nothing else: every other
+ * line and every other app's name stay as they are. With no names left the
+ * line goes too. The Renderer reads the file when it starts, so the change
+ * takes effect at the head unit's next start.
+ *
+ * Run once at its install and at each start, then idle (the Store runs a
+ * service tool with Restart=always). Writes what it did to
+ * /var/opt/mystrip-cleanup/result.txt. Remove it in the Store afterwards.
+ *
+ * Node 8 compatible. GPL-3.0-or-later (CarlMeehanIE/climate-strip).
+ */
+'use strict';
+const fs = require('fs');
+const path = require('path');
+
+const CONF = process.env.MYSTRIP_CLEANUP_CONF || '/var/opt/mgu-render/mgu-render.local.conf';
+const RESULT = process.env.MYSTRIP_CLEANUP_RESULT || '/var/opt/mystrip-cleanup/result.txt';
+const OURS = ['mystrip-bar', 'mystrip_bar'];
+const COMMENT = /^#\s*Climate Bar \(mystrip[-_]bar\) draws in the climate bar\s*$/;
+
+/* The file's text with our names taken out; null when there is nothing of ours in it. */
+function cleaned(text) {
+    const lines = text.replace(/\n$/, '').split('\n');
+    let changed = false;
+    const out = [];
+    lines.forEach((l) => {
+        if (COMMENT.test(l)) {
+            changed = true;
+            return;
+        }
+        const m = /^(\s*overlay_apps\s*=)(.*)$/.exec(l);
+        if (!m) {
+            out.push(l);
+            return;
+        }
+        const ids = m[2].split(/[\s,]+/).filter(Boolean);
+        const kept = ids.filter((id) => OURS.indexOf(id) < 0);
+        if (kept.length === ids.length) {
+            out.push(l);
+            return;
+        }
+        changed = true;
+        if (kept.length) {
+            out.push(`overlay_apps = ${kept.join(', ')}`);
+        }
+    });
+    return changed ? `${out.join('\n')}\n` : null;
+}
+
+function run() {
+    let text;
+    try {
+        text = fs.readFileSync(CONF, 'utf8');
+    } catch (e) {
+        return e.code === 'ENOENT' ? 'no Renderer settings file: nothing to do' : `could not read it: ${e.message}`;
+    }
+    const next = cleaned(text);
+    if (next === null) {
+        return 'nothing of Climate Bar in it: nothing to do';
+    }
+    const tmp = `${CONF}.tmp`;
+    fs.writeFileSync(tmp, next, { mode: 0o644 });
+    fs.chmodSync(tmp, 0o644);
+    fs.renameSync(tmp, CONF);
+    return 'removed Climate Bar from overlay_apps; restart the head unit once';
+}
+
+function main() {
+    let result;
+    try {
+        result = run();
+    } catch (e) {
+        result = `failed: ${e.message}`;
+    }
+    process.stdout.write(`${result}\n`);
+    try {
+        fs.writeFileSync(RESULT, `${new Date().toISOString()} ${result}\n`);
+    } catch (e) {
+        // its folder may not be there; the journal has it
+    }
+    setInterval(() => {}, 24 * 3600 * 1000);       // done; stays up so it is not started again every 3 s
+}
+
+if (require.main === module) {
+    main();
+}
+
+module.exports = { cleaned };

@@ -86,6 +86,21 @@
           "mgu-render.service"
         ]
       }
+    },
+    {
+      "id": "mystrip-cleanup",
+      "path": "services/mystrip_cleanup",
+      "version": "0.1.0",
+      "title": "Climate Bar Cleanup",
+      "mguHmi": [
+        "ID8"
+      ],
+      "description": "One-off: takes Climate Bar's name out of the Renderer's overlay_apps setting, nothing else. Install, restart the head unit, then remove it",
+      "service": {
+        "exec": "mystrip-cleanup",
+        "user": "root",
+        "runtimeDirectory": "mystrip-cleanup"
+      }
     }
   ]
 }
