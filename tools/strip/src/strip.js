@@ -27,6 +27,9 @@
  * member for that seat whose values run to STUFE_4 (BMW's five levels). The
  * route row picks which one the seat rows and the bar's taps send.
  *
+ * The screen shows the three heating rows and Settings; Settings holds the
+ * seat command and the bar's rows (on / off, line up), with Back.
+ *
  * A command is sent only when a row, or a button of the Climate Bar, is
  * tapped. Values are built from the head unit's catalogue (src/types.js).
  *
@@ -134,6 +137,7 @@ class ClimateStrip extends OnlineApp {
         this._link = null;
         this._bar = null;               // the Climate Bar's status; null while it is not connected
         this._carKey = '';
+        this._view = 'main';            // the heating rows, or 'settings': the seat command and the bar's rows
         this._route = 'stage';          // the seats' command: 'stage' (seatHeatingLamination) or 'level' (BMW's level)
 
         this.on('initialized', () => {
@@ -160,13 +164,15 @@ class ClimateStrip extends OnlineApp {
 
     _rows() {
         const c = this._car;
-        const rows = [
+        if (this._view === 'settings') {
+            return [{ text: '‹ Back', view: 'main' }, { text: this._routeText(), route: true }].concat(this._barRows());
+        }
+        return [
             { text: this._seatText('Your seat (driver)', c.dr), heat: 'dr' },
             { text: this._seatText('Passenger seat', c.ps), heat: 'ps' },
             { text: `Steering wheel: ${c.wheel === null ? '?' : (c.wheel ? 'on' : 'off')}`, heat: 'wheel' },
-            { text: this._routeText(), route: true }
+            { text: 'Settings ›', view: 'settings' }
         ];
-        return rows.concat(this._barRows());
     }
 
     /* The Climate Bar's rows: on / off, and while lining up, the moves. */
@@ -187,6 +193,7 @@ class ClimateStrip extends OnlineApp {
         }
         const s = b.settings || {};
         return rows.concat([
+            { text: this._positions(s), bar: null },
             { text: `Moving ${NAMES[b.selected] || b.selected} (tap for the next, or tap it on the bar)`, bar: send({ cmd: 'select' }) },
             { text: `Left ${b.step} px`, bar: send({ cmd: 'move', dx: -1 }) },
             { text: `Right ${b.step} px`, bar: send({ cmd: 'move', dx: 1 }) },
@@ -205,6 +212,13 @@ class ClimateStrip extends OnlineApp {
         ]);
     }
 
+    /* The buttons' places as numbers, to note down: x across the screen
+     * (0-2880), y down it (the climate bar is 840-960), the icons' size. */
+    _positions(s) {
+        const it = s.items || {}, at = (k) => (it[k] ? `${it[k].x}, ${it[k].y}` : '?');
+        return `Numbers: passenger ${at('ps')} · yours ${at('dr')} · wheel ${at('wheel')} · size ${s.size}`;
+    }
+
     _tap(row) {
         const r = this._rows()[row];
         if (!r) {
@@ -212,6 +226,14 @@ class ClimateStrip extends OnlineApp {
         }
         if (r.bar) {
             r.bar();
+            return;
+        }
+        if (r.bar === null) {
+            return;
+        }
+        if (r.view) {
+            this._view = r.view;
+            this._render();
             return;
         }
         if (r.route) {

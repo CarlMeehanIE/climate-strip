@@ -238,12 +238,18 @@ async function tap(i) {
     assert.strictEqual(row(0), 'Your seat (driver): off, heater stage 0');
 
     car.fail = false;
-    assert.strictEqual(row(4), 'Climate bar: not running (install Climate Bar from the Store)');
+    // Settings: the seat command and the bar's rows, with Back
+    assert.strictEqual(row(3), 'Settings ›');
+    await tap(3);
+    await until(() => row(0) === '‹ Back', 'settings open');
+    assert.strictEqual(row(2), 'Climate bar: not running (install Climate Bar from the Store)');
 
     // the second seat command: BMW's level, found in the catalogue, stepped from the level the car reports
-    assert.strictEqual(row(3), 'Seat command: heater stage (tap to try BMW\'s level)');
-    await tap(3);
-    await until(() => row(3) === 'Seat command: BMW\'s level, operationAURAPerso (tap for heater stage)', 'level route');
+    assert.strictEqual(row(1), 'Seat command: heater stage (tap to try BMW\'s level)');
+    await tap(1);
+    await until(() => row(1) === 'Seat command: BMW\'s level, operationAURAPerso (tap for heater stage)', 'level route');
+    await tap(0);
+    await until(() => row(3) === 'Settings ›', 'back to the heating rows');
     const at = sent.length;
     await tap(0);
     await until(() => /^Your seat \(driver\): low/.test(row(0) || ''), 'driver to low by BMW\'s level');
@@ -256,13 +262,18 @@ async function tap(i) {
     await tap(1);
     await until(() => /^Passenger seat: off/.test(row(1) || ''), 'passenger off after very high');
     await tap(3);
-    await until(() => row(3) === 'Seat command: heater stage (tap to try BMW\'s level)', 'back to the heater stage');
+    await until(() => row(0) === '‹ Back', 'settings again');
+    await tap(1);
+    await until(() => row(1) === 'Seat command: heater stage (tap to try BMW\'s level)', 'back to the heater stage');
+    await tap(0);
+    await until(() => row(3) === 'Settings ›', 'the heating rows again');
 
     // the Climate Bar service: told the car's state, its taps sent as commands, its rows send its commands
     const got = [];
     let peer = null;
     const status = { renderer: 'connected', overlay: 'restart', touchRouting: true, safe: false, enabled: true, lineup: false,
-        selected: 'ps', step: 10, settings: { size: 72, cover: true, shade: 0 } };
+        selected: 'ps', step: 10, settings: { size: 72, cover: true, shade: 0,
+        items: { ps: { x: 970, y: 900 }, dr: { x: 2545, y: 902 }, wheel: { x: 2720, y: 900 } } } };
     const server = require('net').createServer((c) => {
         peer = c;
         let buf = '';
@@ -277,7 +288,9 @@ async function tap(i) {
     await new Promise((r) => server.listen(BAR_SOCKET, r));
     await until(() => got.some((m) => m.car), 'the car state sent on connecting', 8000);   // the link tries every 5 s
     assert.deepStrictEqual(got.filter((m) => m.car).pop().car, { dr: { level: 1, stage: 0 }, ps: { level: 0, stage: 3 }, wheel: false });
-    await until(() => row(4) === 'Climate bar: on' && row(5) === 'Line up the bar\'s buttons: off', 'the bar rows');
+    await tap(3);
+    await until(() => row(2) === 'Climate bar: on' && row(3) === 'Line up the bar\'s buttons: off', 'the bar rows');
+    await tap(0);
     assert.strictEqual(last('ClimateStripStatus.0.Text'), 'Climate bar: restart the head unit once to finish setting it up.');
 
     const before = sent.length;
@@ -290,31 +303,36 @@ async function tap(i) {
     peer.write(JSON.stringify({ tap: 'wheel' }) + '\n');
     await until(() => row(2) === 'Steering wheel: on', 'the bar\'s tap turned the wheel on');
 
-    await tap(5);
+    await tap(3);
+    await until(() => row(0) === '‹ Back', 'settings for lining up');
+    await tap(3);
     await until(() => got.some((m) => m.cmd === 'lineup' && m.on === true), 'line up asked');
     peer.write(JSON.stringify({ status: Object.assign({}, status, { overlay: 'set', lineup: true }) }) + '\n');
-    await until(() => row(6) === 'Moving the passenger seat (tap for the next, or tap it on the bar)' && row(7) === 'Left 10 px', 'the line-up rows');
-    assert.strictEqual(row(14), 'Seat icons: auto, BMW\'s own at very high (tap for always)');
-    assert.strictEqual(row(15), 'Put the buttons back where they started', 'no patch rows while BMW\'s indicator shows');
+    await until(() => row(4) === 'Numbers: passenger 970, 900 · yours 2545, 902 · wheel 2720, 900 · size 72' && row(5) === 'Moving the passenger seat (tap for the next, or tap it on the bar)' && row(6) === 'Left 10 px', 'the line-up rows');
+    assert.strictEqual(row(13), 'Seat icons: auto, BMW\'s own at very high (tap for always)');
+    assert.strictEqual(row(14), 'Put the buttons back where they started', 'no patch rows while BMW\'s indicator shows');
     assert.strictEqual(last('ClimateStripStatus.0.Text'), 'Tap a seat to step its heating up (off after the highest), the wheel to turn it on or off.');
-    await tap(8);
-    await tap(13);
-    await tap(14);
     await tap(4);
+    await tap(7);
+    await tap(12);
+    await tap(13);
+    await tap(2);
     await until(() => got.filter((m) => m.cmd).length === 5, 'the commands');
     assert.deepStrictEqual(got.filter((m) => m.cmd), [{ cmd: 'lineup', on: true }, { cmd: 'move', dx: 1 }, { cmd: 'size', d: -1 },
         { cmd: 'seats' }, { cmd: 'enable', on: false }]);
     assert.strictEqual(sent.length, before + 2, 'the bar\'s rows send nothing to the car');
     peer.write(JSON.stringify({ status: Object.assign({}, status, { overlay: 'set', safe: true }) }) + '\n');
-    await until(() => row(4) === 'Climate bar: off after quick restarts (safe mode), tap to turn it on', 'safe mode row');
-    await tap(4);
+    await until(() => row(2) === 'Climate bar: off after quick restarts (safe mode), tap to turn it on', 'safe mode row');
+    await tap(2);
     await until(() => got.filter((m) => m.cmd).length === 6, 'turned on again');
     assert.deepStrictEqual(got.filter((m) => m.cmd).pop(), { cmd: 'enable', on: true });
 
     // the service gone: the row says so
     peer.destroy();
     server.close();
-    await until(() => row(4) === 'Climate bar: not running (install Climate Bar from the Store)', 'the bar gone');
+    await until(() => row(2) === 'Climate bar: not running (install Climate Bar from the Store)', 'the bar gone');
+    await tap(0);
+    await until(() => row(3) === 'Settings ›', 'back');
 
     assert.ok(!logged.some((l) => /MISS|render .*failed/.test(l)), logged.join('\n'));
     console.log('Climate Strip checks passed');
