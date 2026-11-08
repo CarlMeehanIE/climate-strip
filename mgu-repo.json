@@ -65,7 +65,27 @@
         "ID8"
       ],
       "title": "Climate Strip",
-      "description": "Seat and steering wheel heating: your seat, the passenger seat and the wheel, with the levels the car reports"
+      "description": "Seat and steering wheel heating: your seat, the passenger seat and the wheel, with the levels the car reports; runs the Climate Bar's buttons"
+    }
+  ],
+  "tools": [
+    {
+      "id": "mystrip_bar",
+      "path": "services/mystrip_bar",
+      "version": "0.1.0",
+      "title": "Climate Bar",
+      "mguHmi": [
+        "ID8"
+      ],
+      "description": "Seat and steering wheel heating buttons in the climate bar, over BMW's own indicators; needs Climate Strip and the Renderer",
+      "service": {
+        "exec": "mystrip-bar",
+        "user": "root",
+        "runtimeDirectory": "mystrip-bar",
+        "after": [
+          "mgu-render.service"
+        ]
+      }
     }
   ]
 }

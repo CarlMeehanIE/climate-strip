@@ -1,10 +1,11 @@
 {
   "schema": 1,
   "id": "mystrip_climate",
-  "version": "0.1.0",
-  "tree": "mystrip_climate@0.1.0",
+  "version": "0.2.0",
+  "tree": "mystrip_climate@0.2.0",
   "modules": [
     "src/strip.js",
+    "src/bar_link.js",
     "src/types.js",
     "src/iface.js",
     "src/catalog.js"

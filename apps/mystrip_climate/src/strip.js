@@ -21,8 +21,21 @@
  *     operationFunctionStageSeatHeater<DR|PS> = STUFE_<stage> (0-3), every
  *     other member "no action" (KEINE_AKTION) or 0
  *   wheel: SteeringWheelClimate.requestHeating { requestor, heating }
- * A command is sent only when a row is tapped. Values are built from the
- * head unit's catalogue (src/types.js).
+ * A second seat command, to try: BMW's own level (off, low … very high), the
+ * one the car's climate bar indicator follows. Its field is looked up in the
+ * catalogue: a settable Climate field, not seatHeatingLamination, with a
+ * member for that seat whose values run to STUFE_4 (BMW's five levels). The
+ * route row picks which one the seat rows and the bar's taps send.
+ *
+ * A command is sent only when a row, or a button of the Climate Bar, is
+ * tapped. Values are built from the head unit's catalogue (src/types.js).
+ *
+ * The Climate Bar (services/mystrip_bar) draws the same three buttons in the
+ * climate bar. It sends nothing to the car itself: this app keeps it told
+ * what the car reports and sends what its buttons ask for (src/bar_link.js),
+ * from the head unit's start, whether or not this screen is open. The rows
+ * below the heating turn the bar on or off and line its buttons up over
+ * BMW's own indicators.
  *
  * The app's structure (OnlineApp, the RHMI state, presses, entry point,
  * visibility, typed proxies) follows the MGU Store's src/store.js
@@ -34,6 +47,7 @@ const logging = require('oap-sdk/src/logging/logging');
 const someipBuilders = require('oap-sdk/src/someip/someipBuilders');
 const { readInterface } = require('./iface.js');
 const { loadCatalog } = require('./types.js');
+const { BarLink } = require('./bar_link.js');
 
 const logger = logging.getSDKLogger();
 
@@ -41,6 +55,8 @@ const CLIMATE = 'de.bmw.infotainment.climate.Climate';
 const WHEEL = 'de.bmw.body.steeringwheelcomfort.SteeringWheelClimate';
 const STAGES = 4;                       // seatHeatingLamination's stages: STUFE_0 .. STUFE_3
 const LEVELS = ['off', 'low', 'medium', 'high', 'very high'];   // statusSeatHeaterAUTO STUFE_0 .. STUFE_4
+const NAMES = { dr: 'your seat', ps: 'the passenger seat', wheel: 'the steering wheel' };
+const SHADE_COUNT = 4;
 const REQUESTOR = 1;                    // the wheel request's first requestor byte (Heat Test's default)
 
 const PRESS_DEDUPE_MS = 400;
@@ -115,6 +131,10 @@ class ClimateStrip extends OnlineApp {
         this._sent = { dr: 0, ps: 0 };  // the last stage sent to each seat
         this._note = '';
         this._log = [];
+        this._link = null;
+        this._bar = null;               // the Climate Bar's status; null while it is not connected
+        this._carKey = '';
+        this._route = 'stage';          // the seats' command: 'stage' (seatHeatingLamination) or 'level' (BMW's level)
 
         this.on('initialized', () => {
             this._appInitialized().catch((err) => logger.error(`strip init failed: ${err && err.message}`));
@@ -140,16 +160,75 @@ class ClimateStrip extends OnlineApp {
 
     _rows() {
         const c = this._car;
-        return [
-            { text: this._seatText('Your seat (driver)', c.dr), tap: () => this._stepSeat('dr') },
-            { text: this._seatText('Passenger seat', c.ps), tap: () => this._stepSeat('ps') },
-            { text: `Steering wheel: ${c.wheel === null ? '?' : (c.wheel ? 'on' : 'off')}`, tap: () => this._toggleWheel() }
+        const rows = [
+            { text: this._seatText('Your seat (driver)', c.dr), heat: 'dr' },
+            { text: this._seatText('Passenger seat', c.ps), heat: 'ps' },
+            { text: `Steering wheel: ${c.wheel === null ? '?' : (c.wheel ? 'on' : 'off')}`, heat: 'wheel' },
+            { text: this._routeText(), route: true }
         ];
+        return rows.concat(this._barRows());
+    }
+
+    /* The Climate Bar's rows: on / off, and while lining up, the moves. */
+    _barRows() {
+        const b = this._bar;
+        if (!b) {
+            return [{ text: 'Climate bar: not running (install Climate Bar from the Store)' }];
+        }
+        const send = (m) => () => this._link.send(m);
+        const on = b.enabled && !b.safe;
+        const rows = [
+            { text: b.safe ? 'Climate bar: off after quick restarts (safe mode), tap to turn it on' :
+                `Climate bar: ${on ? 'on' : 'off'}`, bar: send({ cmd: 'enable', on: !on }) },
+            { text: `Line up the bar's buttons: ${b.lineup ? 'on' : 'off'}`, bar: send({ cmd: 'lineup', on: !b.lineup }) }
+        ];
+        if (!b.lineup) {
+            return rows;
+        }
+        const s = b.settings || {};
+        return rows.concat([
+            { text: `Moving ${NAMES[b.selected] || b.selected} (tap for the next, or tap it on the bar)`, bar: send({ cmd: 'select' }) },
+            { text: `Left ${b.step} px`, bar: send({ cmd: 'move', dx: -1 }) },
+            { text: `Right ${b.step} px`, bar: send({ cmd: 'move', dx: 1 }) },
+            { text: `Up ${b.step} px`, bar: send({ cmd: 'move', dy: -1 }) },
+            { text: `Down ${b.step} px`, bar: send({ cmd: 'move', dy: 1 }) },
+            { text: `Step: ${b.step} px (tap to change)`, bar: send({ cmd: 'step' }) },
+            { text: `Bigger (size ${s.size})`, bar: send({ cmd: 'size', d: 1 }) },
+            { text: `Smaller (size ${s.size})`, bar: send({ cmd: 'size', d: -1 }) },
+            { text: { drawn: 'Seat icons: always drawn (tap for never)', invisible: 'Seat icons: never drawn, BMW\'s only (tap for auto)' }[s.seats] ||
+                'Seat icons: auto, BMW\'s own at very high (tap for always)', bar: send({ cmd: 'seats' }) }
+        ]).concat(s.seats !== 'drawn' ? [] : [
+            { text: `Patch behind the seat buttons: ${s.cover ? 'on' : 'off'}`, bar: send({ cmd: 'cover' }) },
+            { text: `Patch colour: ${(s.shade || 0) + 1} of ${SHADE_COUNT} (tap for the next)`, bar: send({ cmd: 'shade' }) }
+        ]).concat([
+            { text: 'Put the buttons back where they started', bar: send({ cmd: 'reset' }) }
+        ]);
     }
 
     _tap(row) {
         const r = this._rows()[row];
         if (!r) {
+            return;
+        }
+        if (r.bar) {
+            r.bar();
+            return;
+        }
+        if (r.route) {
+            this._route = this._route === 'stage' ? 'level' : 'stage';
+            this._entry(`Seat command: ${this._routeText().replace(/^Seat command: /, '')}`);
+            this._render();
+            return;
+        }
+        if (r.heat) {
+            this._heat(r.heat, 'row');
+        }
+    }
+
+    /* A seat stepped up or the wheel turned on / off, from a row or the bar. */
+    _heat(item, from) {
+        const job = { dr: () => this._stepSeat('dr'), ps: () => this._stepSeat('ps'), wheel: () => this._toggleWheel() }[item];
+        if (!job) {
             return;
         }
         if (this._busy) {
@@ -162,8 +241,9 @@ class ClimateStrip extends OnlineApp {
         this._render();
         Promise.resolve()
             .then(() => this._ready())
-            .then(() => r.tap())
-            .then((what) => this._entry(`${what}: OK`), (err) => this._entry(`FAILED ${err && err.message}`))
+            .then(() => job())
+            .then((what) => this._entry(`${what}${from === 'bar' ? ' (climate bar)' : ''}: OK`),
+                (err) => this._entry(`FAILED ${err && err.message}`))
             .then(() => {
                 this._busy = false;
                 this._render();
@@ -182,7 +262,43 @@ class ClimateStrip extends OnlineApp {
     /* One stage up from the heater's stage as the car reports it (Heat Test:
      * it follows the stage sent), or from the last stage sent while the car
      * has not reported one; off after the highest. */
+    _routeText() {
+        if (this._route === 'stage') {
+            return 'Seat command: heater stage (tap to try BMW\'s level)';
+        }
+        const r = this._cat && this._levelRoute('dr');
+        return r ? `Seat command: BMW's level, ${r.field} (tap for heater stage)` :
+            'Seat command: BMW\'s level, none found in the catalogue (tap for heater stage)';
+    }
+
+    /* The Climate field that sets BMW's level for a seat: settable, not
+     * seatHeatingLamination, with a member for that seat whose values run to
+     * STUFE_4. { field, member, ref } or null. */
+    _levelRoute(seat) {
+        const f = (this._cat.iface(CLIMATE) || {}).fields || {};
+        const side = seat === 'dr' ? /(DR|Driver|Fahrer)$/i : /(PS|Passenger|Codriver|Beifahrer|BF)$/i;
+        const toFour = (ref) => {
+            const d = this._cat.resolveRef(ref).d;
+            return !!(d && d.type === 'enum' && d.items && Object.prototype.hasOwnProperty.call(d.items, 'STUFE_4'));
+        };
+        const names = Object.keys(f).sort();
+        for (let i = 0; i < names.length; i++) {
+            const name = names[i];
+            if (name === 'seatHeatingLamination' || !f[name].setter) {
+                continue;
+            }
+            const m = this._cat.members(f[name].dataRef).filter((x) => /Seat/i.test(x.name) && side.test(x.name) && toFour(x.dataRef))[0];
+            if (m) {
+                return { field: name, member: m.name, ref: f[name].dataRef };
+            }
+        }
+        return null;
+    }
+
     _stepSeat(seat) {
+        if (this._route === 'level') {
+            return this._stepLevel(seat);
+        }
         const reported = this._car[seat].stage;
         const from = typeof reported === 'number' && reported >= 0 && reported < STAGES ? reported : this._sent[seat];
         const next = (from + 1) % STAGES;
@@ -190,6 +306,19 @@ class ClimateStrip extends OnlineApp {
             this._sent[seat] = next;
             return `${seat === 'dr' ? 'Driver' : 'Passenger'} seat → stage ${next}`;
         });
+    }
+
+    /* BMW's level one up from the level the car reports, off after very high. */
+    _stepLevel(seat) {
+        const r = this._levelRoute(seat);
+        if (!r) {
+            return Promise.reject(new Error('no BMW level field in the catalogue'));
+        }
+        const now = this._car[seat].level;
+        const next = ((typeof now === 'number' ? now : 0) + 1) % LEVELS.length;
+        const value = this._cat.fill(r.ref, (path) => (path === r.member ? `STUFE_${next}` : undefined));
+        return this._proxy(CLIMATE).then((p) => within(this._setField(p, r.field, value), CALL_MS, r.field))
+            .then(() => `${seat === 'dr' ? 'Driver' : 'Passenger'} seat → ${LEVELS[next]} (${r.field}.${r.member})`);
     }
 
     _setSeat(seat, stage) {
@@ -290,10 +419,10 @@ class ClimateStrip extends OnlineApp {
                 }
                 const pr = [];
                 if (typeof a.subscribe === 'function') {
-                    pr.push(a.subscribe((v) => { fn(v); this._render(); }));
+                    pr.push(a.subscribe((v) => { fn(v); this._changed(); }));
                 }
                 if (typeof a.getValue === 'function') {
-                    pr.push(Promise.resolve(a.getValue()).then((v) => { fn(v); this._render(); }));
+                    pr.push(Promise.resolve(a.getValue()).then((v) => { fn(v); this._changed(); }));
                 }
                 return Promise.all(pr);
             })
@@ -313,10 +442,67 @@ class ClimateStrip extends OnlineApp {
         sub(WHEEL, 'heatingState', (v) => { this._car.wheel = v && typeof v === 'object' && 'heating' in v ? !!v.heating : null; });
     }
 
+    /* The car's state changed: the rows and the bar. */
+    _changed() {
+        const c = this._car;
+        const car = { dr: { level: c.dr.level, stage: c.dr.stage }, ps: { level: c.ps.level, stage: c.ps.stage }, wheel: c.wheel };
+        const key = JSON.stringify(car);
+        if (this._link && key !== this._carKey) {
+            this._carKey = key;
+            this._link.send({ car });
+        }
+        this._render();
+    }
+
+    /* Watching the car and the bar's link, from the app's start. */
+    _start() {
+        if (this._started) {
+            return;
+        }
+        this._started = true;
+        this._ready().catch((err) => { this._note = `Catalogue not read: ${err && err.message}`; this._render(); });
+        this._watchCar();
+        this._link = new BarLink(logger);
+        this._link.on('tap', (item) => {
+            logger.info(`strip climate bar: ${item}`);
+            this._heat(item, 'bar');
+        });
+        this._link.on('status', (s) => {
+            this._bar = s;
+            this._render();
+        });
+        this._link.start();
+    }
+
+    /* The bar's setting up, when it needs saying. */
+    _barNote() {
+        const b = this._bar;
+        if (!b) {
+            return '';
+        }
+        if (b.overlay === 'no renderer' || b.renderer === 'not running') {
+            return 'Climate bar: the Store\'s Renderer is not running; install it from the Store.';
+        }
+        if (b.renderer === 'not mgu-render') {
+            return 'Climate bar: another renderer is in charge; it needs the Store\'s Renderer.';
+        }
+        if (b.overlay === 'restart') {
+            return 'Climate bar: restart the head unit once to finish setting it up.';
+        }
+        if (/^error/.test(b.overlay || '')) {
+            return `Climate bar: could not set up the renderer (${b.overlay.slice(7)}).`;
+        }
+        if (b.touchRouting === false) {
+            return 'Climate bar: the Renderer has touch turned off, so its buttons cannot be tapped.';
+        }
+        return '';
+    }
+
     /* ---- the app ---- */
 
     _appInitialized() {
         logger.info(`strip ${this.getAppId()} starting`);
+        this._start();
         if (!this.rhmiApplication) {
             return this.initialized();
         }
@@ -484,7 +670,8 @@ class ClimateStrip extends OnlineApp {
         if (!this._visible || this._shutdownPromise) {
             return;
         }
-        const status = this._busy ? 'Sending…' : (this._note || 'Tap a seat to step its heating up (off after the highest), the wheel to turn it on or off.');
+        const status = this._busy ? 'Sending…' : (this._note || this._barNote() ||
+            'Tap a seat to step its heating up (off after the highest), the wheel to turn it on or off.');
         this._setCell(C.status, 'Text', status);
         this._list(C.rows, this._rows().map((r) => r.text));
         this._list(C.log, this._log);
@@ -500,11 +687,7 @@ class ClimateStrip extends OnlineApp {
         if (visible) {
             this._written = {};
             this._render();
-            if (!this._started) {
-                this._started = true;
-                this._ready().catch((err) => { this._note = `Catalogue not read: ${err && err.message}`; this._render(); });
-                this._watchCar();
-            }
+            this._start();
         }
         if (!this._initialized || !this._appStatusService) {
             return;
@@ -520,6 +703,9 @@ class ClimateStrip extends OnlineApp {
         }
         logger.info(`strip shutting down (${reason})`);
         clearTimeout(this._hideTimer);
+        if (this._link) {
+            this._link.stop();
+        }
         this._shutdownPromise = Promise.resolve()
             .then(() => this.destroyBundles().catch((err) => logger.info(`destroyBundles: ${err && err.message}`)))
             .then(() => process.exit(0));

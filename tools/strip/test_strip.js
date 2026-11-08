@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Offline check of the built Climate Strip (stage one) against stand-ins:
+ * Offline check of the built Climate Strip against stand-ins:
  * the oap-sdk (OnlineApp, logging, someipBuilders with typed proxies whose
  * native proxy records commands and answers like the car: a seat's heater
  * stage follows the stage sent, the wheel follows requestHeating), the RHMI
@@ -8,7 +8,10 @@
  * layout. Checks the rows' levels (BMW's names from statusAURAPerso, the
  * heater stage), nothing sent before a tap, stepping a seat up from the
  * stage the car reports and back to off, the driver's row addressing the
- * driver's seat, the wheel on and off, the log, and a failed command.
+ * driver's seat, the wheel on and off, the log, and a failed command; then,
+ * with a stand-in Climate Bar service on a socket: the car's state sent to
+ * it, a tap on the bar sending the command, the bar's rows (on / off, line
+ * up and its moves) sending the bar's commands, and its notes.
  *
  *   node tools/make_strip.js && node tools/strip/test_strip.js
  */
@@ -24,7 +27,7 @@ const META = JSON.parse(fs.readFileSync(path.join(APP, 'mgu-app.json'), 'utf8'))
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'strip-'));
 const APPDIR = path.join(ROOT, 'javascript');
 fs.mkdirSync(APPDIR);
-['strip.js', 'types.js', 'iface.js', 'catalog.js'].forEach((n) => fs.copyFileSync(path.join(APP, 'src', n), path.join(APPDIR, n)));
+['strip.js', 'bar_link.js', 'types.js', 'iface.js', 'catalog.js'].forEach((n) => fs.copyFileSync(path.join(APP, 'src', n), path.join(APPDIR, n)));
 
 const CT = 'de.bmw.infotainment.climatetypes.ClimateTypes.';
 const STAGE = { KEINE_AKTION: 4, RESERVIERT: 13, RESERVIERT_1: 14, SIGNAL_UNBEFUELLT: 15, STUFE_0: 0, STUFE_1: 1, STUFE_2: 2, STUFE_3: 3 };
@@ -34,7 +37,8 @@ const CAT = {
             seatHeatingLamination: { setter: { id: 90 }, dataRef: CT + 'Lamination' },
             statusSeatHeatingDR: { getter: { id: 19 }, notifier: { id: 1 }, dataRef: CT + 'DR' },
             statusSeatHeatingPS: { getter: { id: 21 }, notifier: { id: 2 }, dataRef: CT + 'PS' },
-            statusAURAPerso: { getter: { id: 30 }, notifier: { id: 3 }, dataRef: CT + 'Aura' }
+            statusAURAPerso: { getter: { id: 30 }, notifier: { id: 3 }, dataRef: CT + 'Aura' },
+            operationAURAPerso: { setter: { id: 91 }, dataRef: CT + 'AuraSet' }
         } },
         'de.bmw.body.steeringwheelcomfort.SteeringWheelClimate': { serviceId: 5200, fields: {
             heatingState: { getter: { id: 1 }, notifier: { id: 32769 }, dataRef: 'de.bmw.body.HeatingState' }
@@ -51,6 +55,9 @@ const CAT = {
             { name: 'operationFunctionStageSeatHeaterPS', dataRef: CT + 'Stage' },
             { name: 'operationFunctionStageNeckHeaterDR', dataRef: CT + 'Neck' }] },
         [CT + 'Stage']: { type: 'enum', items: STAGE },
+        [CT + 'AuraSet']: { type: 'struct', members: [{ name: 'operationSeatHeaterAUTODriver', dataRef: CT + 'Level' },
+            { name: 'operationSeatHeaterAUTOPassenger', dataRef: CT + 'Level' }] },
+        [CT + 'Level']: { type: 'enum', items: { KEINE_AKTION: 7, STUFE_0: 0, STUFE_1: 1, STUFE_2: 2, STUFE_3: 3, STUFE_4: 4 } },
         [CT + 'Neck']: { type: 'enum', items: { AUS: 1, KEINE_AKTION: 0, NWR_STUFE_1: 2 } },
         [CT + 'DR']: { type: 'struct', members: [{ name: 'statusSeatHeaterDR', dataRef: 'UInt8' }] },
         [CT + 'PS']: { type: 'struct', members: [{ name: 'statusSeatHeaterPS', dataRef: 'UInt8' }] },
@@ -117,7 +124,14 @@ const someipBuilders = {
             setValue: (field, value) => {
                 sent.push({ short, name: field, value });
                 if (car.fail) { return Promise.reject(new Error('refused')); }
-                const st = (v) => (v === 'KEINE_AKTION' ? null : Number(String(v).replace('STUFE_', '')));
+                const st = (v) => (v === 'KEINE_AKTION' || v === undefined ? null : Number(String(v).replace('STUFE_', '')));
+                if (field === 'operationAURAPerso') {
+                    const a = st(value.operationSeatHeaterAUTODriver), b = st(value.operationSeatHeaterAUTOPassenger);
+                    if (a !== null) { car.autoDr = `STUFE_${a}`; }
+                    if (b !== null) { car.autoPs = `STUFE_${b}`; }
+                    setTimeout(notify, 5);
+                    return Promise.resolve();
+                }
                 const dr = st(value.operationFunctionStageSeatHeaterDR);
                 const ps = st(value.operationFunctionStageSeatHeaterPS);
                 if (dr !== null) { car.dr = dr; car.autoDr = `STUFE_${dr}`; }
@@ -145,12 +159,16 @@ const logged = [];
 const quiet = { info(l) { logged.push(String(l)); }, warn(l) { logged.push(String(l)); }, error(l) { logged.push(String(l)); } };
 const realIface = require(path.join(APPDIR, 'iface.js'));
 const realTypes = require(path.join(APPDIR, 'types.js'));
+const realLink = require(path.join(APPDIR, 'bar_link.js'));
+const BAR_SOCKET = path.join(ROOT, 'bar.sock');
+class TestLink extends realLink.BarLink { constructor(log) { super(log, BAR_SOCKET); } }
 const stubs = {
     'oap-sdk/src/core/OnlineApp.js': OnlineApp,
     'oap-sdk/src/logging/logging': { getSDKLogger: () => quiet },
     'oap-sdk/src/someip/someipBuilders': someipBuilders,
     './iface.js': { readInterface: (o) => realIface.readInterface(Object.assign({}, o, { file: CAT_FILE })) },
-    './types.js': { loadCatalog: () => realTypes.loadCatalog({ file: CAT_FILE }) }
+    './types.js': { loadCatalog: () => realTypes.loadCatalog({ file: CAT_FILE }) },
+    './bar_link.js': { BarLink: TestLink }
 };
 const load = Module._load;
 Module._load = function (req) { return stubs[req] || load.apply(this, arguments); };
@@ -163,8 +181,8 @@ const last = (prefix) => {
     return w ? w.slice(prefix.length + 1) : undefined;
 };
 const row = (i) => last(`ClimateStripRows.${i}.PrimaryText`);
-async function until(pred, what) {
-    for (let i = 0; i < 300; i++) {
+async function until(pred, what, ms) {
+    for (let i = 0; i < (ms || 3000) / 10; i++) {
         if (pred()) { return; }
         await tick(10);
     }
@@ -218,6 +236,85 @@ async function tap(i) {
     await tap(0);
     await until(() => /FAILED .*refused/.test(last('ClimateStripLog.0.PrimaryText') || ''), 'failure logged');
     assert.strictEqual(row(0), 'Your seat (driver): off, heater stage 0');
+
+    car.fail = false;
+    assert.strictEqual(row(4), 'Climate bar: not running (install Climate Bar from the Store)');
+
+    // the second seat command: BMW's level, found in the catalogue, stepped from the level the car reports
+    assert.strictEqual(row(3), 'Seat command: heater stage (tap to try BMW\'s level)');
+    await tap(3);
+    await until(() => row(3) === 'Seat command: BMW\'s level, operationAURAPerso (tap for heater stage)', 'level route');
+    const at = sent.length;
+    await tap(0);
+    await until(() => /^Your seat \(driver\): low/.test(row(0) || ''), 'driver to low by BMW\'s level');
+    assert.deepStrictEqual(sent[at], { short: 'Climate', name: 'operationAURAPerso',
+        value: { operationSeatHeaterAUTODriver: 'STUFE_1', operationSeatHeaterAUTOPassenger: 'KEINE_AKTION' } });
+    assert.ok(/Driver seat → low \(operationAURAPerso.operationSeatHeaterAUTODriver\): OK/.test(last('ClimateStripLog.0.PrimaryText')));
+    await tap(1);
+    await until(() => /^Passenger seat: very high/.test(row(1) || ''), 'passenger from high to very high');
+    assert.strictEqual(sent[sent.length - 1].value.operationSeatHeaterAUTOPassenger, 'STUFE_4');
+    await tap(1);
+    await until(() => /^Passenger seat: off/.test(row(1) || ''), 'passenger off after very high');
+    await tap(3);
+    await until(() => row(3) === 'Seat command: heater stage (tap to try BMW\'s level)', 'back to the heater stage');
+
+    // the Climate Bar service: told the car's state, its taps sent as commands, its rows send its commands
+    const got = [];
+    let peer = null;
+    const status = { renderer: 'connected', overlay: 'restart', touchRouting: true, safe: false, enabled: true, lineup: false,
+        selected: 'ps', step: 10, settings: { size: 72, cover: true, shade: 0 } };
+    const server = require('net').createServer((c) => {
+        peer = c;
+        let buf = '';
+        c.setEncoding('utf8');
+        c.on('data', (d) => {
+            buf += d;
+            let at;
+            while ((at = buf.indexOf('\n')) >= 0) { got.push(JSON.parse(buf.slice(0, at))); buf = buf.slice(at + 1); }
+        });
+        c.write(JSON.stringify({ status }) + '\n');
+    });
+    await new Promise((r) => server.listen(BAR_SOCKET, r));
+    await until(() => got.some((m) => m.car), 'the car state sent on connecting', 8000);   // the link tries every 5 s
+    assert.deepStrictEqual(got.filter((m) => m.car).pop().car, { dr: { level: 1, stage: 0 }, ps: { level: 0, stage: 3 }, wheel: false });
+    await until(() => row(4) === 'Climate bar: on' && row(5) === 'Line up the bar\'s buttons: off', 'the bar rows');
+    assert.strictEqual(last('ClimateStripStatus.0.Text'), 'Climate bar: restart the head unit once to finish setting it up.');
+
+    const before = sent.length;
+    peer.write(JSON.stringify({ tap: 'ps' }) + '\n');
+    await until(() => row(1) === 'Passenger seat: off, heater stage 0', 'the bar\'s tap stepped the passenger seat');
+    assert.strictEqual(sent.length, before + 1);
+    assert.strictEqual(sent[before].value.operationFunctionStageSeatHeaterPS, 'STUFE_0');
+    assert.ok(/Passenger seat → stage 0 \(climate bar\): OK/.test(last('ClimateStripLog.0.PrimaryText')));
+    await until(() => got.filter((m) => m.car).pop().car.ps.stage === 0, 'the new state sent to the bar');
+    peer.write(JSON.stringify({ tap: 'wheel' }) + '\n');
+    await until(() => row(2) === 'Steering wheel: on', 'the bar\'s tap turned the wheel on');
+
+    await tap(5);
+    await until(() => got.some((m) => m.cmd === 'lineup' && m.on === true), 'line up asked');
+    peer.write(JSON.stringify({ status: Object.assign({}, status, { overlay: 'set', lineup: true }) }) + '\n');
+    await until(() => row(6) === 'Moving the passenger seat (tap for the next, or tap it on the bar)' && row(7) === 'Left 10 px', 'the line-up rows');
+    assert.strictEqual(row(14), 'Seat icons: auto, BMW\'s own at very high (tap for always)');
+    assert.strictEqual(row(15), 'Put the buttons back where they started', 'no patch rows while BMW\'s indicator shows');
+    assert.strictEqual(last('ClimateStripStatus.0.Text'), 'Tap a seat to step its heating up (off after the highest), the wheel to turn it on or off.');
+    await tap(8);
+    await tap(13);
+    await tap(14);
+    await tap(4);
+    await until(() => got.filter((m) => m.cmd).length === 5, 'the commands');
+    assert.deepStrictEqual(got.filter((m) => m.cmd), [{ cmd: 'lineup', on: true }, { cmd: 'move', dx: 1 }, { cmd: 'size', d: -1 },
+        { cmd: 'seats' }, { cmd: 'enable', on: false }]);
+    assert.strictEqual(sent.length, before + 2, 'the bar\'s rows send nothing to the car');
+    peer.write(JSON.stringify({ status: Object.assign({}, status, { overlay: 'set', safe: true }) }) + '\n');
+    await until(() => row(4) === 'Climate bar: off after quick restarts (safe mode), tap to turn it on', 'safe mode row');
+    await tap(4);
+    await until(() => got.filter((m) => m.cmd).length === 6, 'turned on again');
+    assert.deepStrictEqual(got.filter((m) => m.cmd).pop(), { cmd: 'enable', on: true });
+
+    // the service gone: the row says so
+    peer.destroy();
+    server.close();
+    await until(() => row(4) === 'Climate bar: not running (install Climate Bar from the Store)', 'the bar gone');
 
     assert.ok(!logged.some((l) => /MISS|render .*failed/.test(l)), logged.join('\n'));
     console.log('Climate Strip checks passed');

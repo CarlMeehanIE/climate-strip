@@ -1,12 +1,16 @@
 'use strict';
 /**
- * Builds Climate Strip, stage one (apps/mystrip_climate), from
+ * Builds Climate Strip (apps/mystrip_climate) from
  * tools/strip/src, Heat Test's types.js, the Heat Watch apps' iface.js and
  * Signal Finder's catalog.js and package files: mgu-app.json, src/, icon.png
  * and the package tree <id>@<version> (manifest.json naming the Climate and
  * SteeringWheelClimate interfaces, rhmiData/ with one iDrive 8 screen: the
  * status line, the seat and wheel rows, the log). Ids and uuids are derived
  * from the app id, so a rebuild writes the same files.
+ *
+ * mgu-repo.json lists the app and, under tools, the Climate Bar service
+ * (services/mystrip_bar/mystrip-bar, run as root by the Store's deploy
+ * tool with its runtime folder /run/mystrip-bar).
  *
  *   node tools/make_strip.js
  */
@@ -18,10 +22,13 @@ const REPO = path.join(__dirname, '..');
 const FINDER = path.join(REPO, 'apps', 'mystrip_finder');
 const FINDER_TREE = path.join(FINDER, JSON.parse(fs.readFileSync(path.join(FINDER, 'mgu-app.json'), 'utf8')).tree);
 const ID = 'mystrip_climate';
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const PREFIX = 'ClimateStrip';
 const TITLE = 'Climate Strip';
-const DESCRIPTION = 'Seat and steering wheel heating: your seat, the passenger seat and the wheel, with the levels the car reports';
+const DESCRIPTION = 'Seat and steering wheel heating: your seat, the passenger seat and the wheel, with the levels the car reports; runs the Climate Bar\'s buttons';
+const BAR = { id: 'mystrip_bar', path: 'services/mystrip_bar', version: '0.1.0', title: 'Climate Bar', mguHmi: ['ID8'],
+    description: 'Seat and steering wheel heating buttons in the climate bar, over BMW\'s own indicators; needs Climate Strip and the Renderer',
+    service: { exec: 'mystrip-bar', user: 'root', runtimeDirectory: 'mystrip-bar', after: ['mgu-render.service'] } };
 const IFACES = ['de.bmw.infotainment.climate.Climate', 'de.bmw.body.steeringwheelcomfort.SteeringWheelClimate'];
 
 function uuid(seed) {
@@ -82,9 +89,10 @@ function build() {
     const dir = path.join(REPO, 'apps', ID);
     const tree = path.join(dir, `${ID}@${VERSION}`);
     write(path.join(dir, 'mgu-app.json'), json({ schema: 1, id: ID, version: VERSION, tree: `${ID}@${VERSION}`,
-        modules: ['src/strip.js', 'src/types.js', 'src/iface.js', 'src/catalog.js'],
+        modules: ['src/strip.js', 'src/bar_link.js', 'src/types.js', 'src/iface.js', 'src/catalog.js'],
         sdk: ['oap-sdk/src/core/OnlineApp.js', 'oap-sdk/src/logging/logging', 'oap-sdk/src/someip/someipBuilders'] }));
     write(path.join(dir, 'src', 'strip.js'), fs.readFileSync(path.join(__dirname, 'strip', 'src', 'strip.js')));
+    write(path.join(dir, 'src', 'bar_link.js'), fs.readFileSync(path.join(__dirname, 'strip', 'src', 'bar_link.js')));
     write(path.join(dir, 'src', 'types.js'), fs.readFileSync(path.join(__dirname, 'heattest', 'src', 'types.js')));
     write(path.join(dir, 'src', 'iface.js'), fs.readFileSync(path.join(__dirname, 'watch', 'src', 'iface.js')));
     write(path.join(dir, 'src', 'catalog.js'), fs.readFileSync(path.join(FINDER, 'src', 'catalog.js')));
@@ -111,12 +119,13 @@ function build() {
     const m = JSON.parse(fs.readFileSync(file, 'utf8'));
     m.components = m.components.filter((c) => c.id !== ID);
     m.components.push({ id: ID, kind: 'app', path: `apps/${ID}`, build: 'unit', mguHmi: ['ID8'], title: TITLE, description: DESCRIPTION });
+    m.tools = (m.tools || []).filter((t) => t.id !== BAR.id).concat([BAR]);
     fs.writeFileSync(file, json(m));
     return dir;
 }
 
 if (require.main === module) {
-    console.log(`wrote ${path.relative(REPO, build())}; mgu-repo.json lists ${ID}`);
+    console.log(`wrote ${path.relative(REPO, build())}; mgu-repo.json lists ${ID} and ${BAR.id}`);
 }
 
 module.exports = { ID, VERSION };

@@ -1,0 +1,761 @@
+#!/usr/bin/node
+/**
+ * mystrip-bar - Climate Bar: the seat heating and steering wheel heating
+ * buttons drawn in the iDrive 8 climate bar (the bottom 120 px of the
+ * 2880x960 centre display), over BMW's own seat heating indicators.
+ *
+ * BMW's seat indicator shows only at its highest level (very high, BMW's
+ * level 4), and the climate bar is see-through, so nothing can hide it. So
+ * by default ("auto") a seat's icon is drawn at every other level and left
+ * out at very high, where BMW's own shows in its place; the level bar
+ * under it (four segments, one lit per level) and the touch area are there
+ * either way. "drawn" draws the icon always (over an optional patch),
+ * "invisible" never. The wheel's icon is always drawn, on its own (BMW has
+ * no wheel indicator), with one solid bar under it: red when on, grey
+ * when off.
+ *
+ * A service of its own (root), because only a root client of mgu-render
+ * named in its overlay_apps may draw and take touch in the climate bar
+ * (mgu-render README.md, "overlay_apps"). It sends nothing to the car:
+ * Climate Strip (apps/mystrip_climate) does that. The two talk over
+ * /run/mystrip-bar/bar.sock (0660 root:tm_oap_app), one JSON object per line:
+ *
+ *   Climate Strip -> bar  {"car": {"dr": {"level", "stage"}, "ps": {...}, "wheel": true|false|null}}
+ *                         {"cmd": "enable"|"lineup", "on": bool}
+ *                         {"cmd": "select", "item": "dr"|"ps"|"wheel"} (no item: the next)
+ *                         {"cmd": "move", "dx", "dy"}  {"cmd": "size", "d"}
+ *                         {"cmd": "step"}  {"cmd": "cover"}  {"cmd": "shade"}  {"cmd": "reset"}
+ *                         {"cmd": "seats"}  the seat icons: auto, drawn, invisible (each in turn)
+ *   bar -> Climate Strip  {"tap": "dr"|"ps"|"wheel"}   a button was tapped
+ *                         {"status": {...}}             sent on connect and whenever it changes
+ *
+ * Safe mode: each start counts a strike in /var/opt/mystrip_bar/strikes and
+ * 2 minutes of running clears it. A third start in a row with none of them
+ * getting that far (the head unit restarted twice, each time within
+ * 2 minutes of starting, or this service crashing) leaves the bar off,
+ * drawing nothing and claiming no touch, until it is turned on again in
+ * Climate Strip.
+ *
+ * Setting up: this service adds its id to overlay_apps in mgu-render's own
+ * settings file (/var/opt/mgu-render/mgu-render.local.conf), keeping every
+ * other line; the renderer reads it at its next start, the head unit's.
+ *
+ * The icons are the owner's drawings (icons/seat.png, icons/wheel.png),
+ * turned into coverage masks by tools/make_bar_icons.js (below, between the
+ * ICONS markers), coloured here and uploaded once per connection.
+ *
+ * Node 8 compatible; needs only fs, net, path and zlib. GPL-3.0-or-later
+ * (CarlMeehanIE/climate-strip); the renderer's protocol is mgu-render's
+ * PROTOCOL.md (robertnisipeanu/mgu-store, GPL-3.0).
+ */
+'use strict';
+const fs = require('fs');
+const net = require('net');
+const path = require('path');
+const zlib = require('zlib');
+
+const ID = 'mystrip_bar';
+const ENV = process.env;
+const DIR = ENV.MYSTRIP_BAR_DIR || '/var/opt/mystrip_bar';
+const RENDER_SOCKET = ENV.MYSTRIP_BAR_RENDER || '/run/mgu-render/render.sock';
+const LOCAL_CONF = ENV.MYSTRIP_BAR_LOCAL_CONF || '/var/opt/mgu-render/mgu-render.local.conf';
+const LINK_SOCKET = ENV.MYSTRIP_BAR_LINK || '/run/mystrip-bar/bar.sock';
+const PROC = ENV.MYSTRIP_BAR_PROC || '/proc';
+const GROUP_FILE = ENV.MYSTRIP_BAR_GROUP || '/etc/group';
+const HEALTHY_MS = Number(ENV.MYSTRIP_BAR_HEALTHY_MS) || 120000;
+const STRIKES = 3;                  // this start and the two before it, none running HEALTHY_MS
+const APP_GROUP = 'tm_oap_app';
+const APP_GID = 12202;              // tm_oap_app on the head unit, when /etc/group does not say
+
+/* The climate bar on the screen, and the buttons' defaults in screen px (from
+ * a photo of a right-hand-drive M340d: the passenger's seat indicator, the
+ * driver's, and free space at the far right for the wheel). */
+const BAR = { x: 0, y: 840, w: 2880, h: 120 };
+const DEFAULTS = {
+    enabled: true, seats: 'auto', cover: false, shade: 0, size: 72,
+    items: { ps: { x: 970, y: 900 }, dr: { x: 2545, y: 900 }, wheel: { x: 2720, y: 900 } }
+};
+const ITEMS = ['ps', 'dr', 'wheel'];
+const SEAT_MODES = ['auto', 'drawn', 'invisible'];
+const BMW_SHOWS = 4;                // BMW's level at which its own seat indicator is in the bar
+const SHADES = [0x000000ff, 0x0a0a0cff, 0x141518ff, 0x1e1f24ff];
+const STEPS = [10, 2, 40];
+const WHITE = 0xe4e6eaff, DIM = 0x5f6268ff, RED = 0xe5322dff, CYAN = 0x00c8ffff, YELLOW = 0xffd200ff;
+/* The uploaded pictures: a seat while its state is unknown, at stage 0-3; the wheel unknown, off, on. */
+const IMG = { seatUnknown: 1, seat: [2, 3, 4, 5], wheelUnknown: 6, wheelOff: 7, wheelOn: 8 };
+const FRAME_MS = 500;               // the renderer hides an app silent for 3 s
+const TAP_MS = 1500;
+
+const M = { HELLO: 1, PLACE: 2, SHOW: 3, FRAME: 7, CLAIM: 9, IMAGE: 10 };
+const X = { MODE: 0x4d520001, READY: 0x4d520101, STATE: 0x4d520102 };
+const E = { READY: 101, TICK: 102, ERROR: 103, TOUCH: 105, CLOSED: 106 };
+const OP = { CLEAR: 1, RRECT: 4, RSTROKE: 5, ARC: 8, LINE: 9, IMAGE: 18 };
+
+/* ICONS BEGIN (tools/make_bar_icons.js) */
+const ICON_SIZE = 128;
+const ICON_MASKS = {
+    seat: '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',
+    wheel: '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'
+};
+/* ICONS END */
+
+function log(text) {
+    process.stdout.write(`${text}\n`);
+}
+
+function clamp(v, lo, hi) {
+    v = Number(v);
+    return isFinite(v) ? Math.max(lo, Math.min(hi, Math.round(v))) : lo;
+}
+
+function readJson(file, fallback) {
+    try {
+        return JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (e) {
+        return fallback;
+    }
+}
+
+/* Written whole or not at all. */
+function writeFile(file, text, mode) {
+    const tmp = `${file}.tmp`;
+    fs.writeFileSync(tmp, text, { mode: mode || 0o644 });
+    fs.chmodSync(tmp, mode || 0o644);
+    fs.renameSync(tmp, file);
+}
+
+/* ---------------- settings ---------------- */
+
+function cleanSettings(s) {
+    s = s && typeof s === 'object' ? s : {};
+    const out = {
+        enabled: s.enabled === undefined ? DEFAULTS.enabled : !!s.enabled,
+        seats: SEAT_MODES.indexOf(s.seats) >= 0 ? s.seats : 'auto',
+        cover: s.cover === undefined ? DEFAULTS.cover : !!s.cover,
+        shade: clamp(s.shade === undefined ? DEFAULTS.shade : s.shade, 0, SHADES.length - 1),
+        size: clamp(s.size === undefined ? DEFAULTS.size : s.size, 32, 110),
+        items: {}
+    };
+    ITEMS.forEach((k) => {
+        const it = (s.items && s.items[k]) || DEFAULTS.items[k];
+        out.items[k] = { x: clamp(it.x, BAR.x, BAR.x + BAR.w), y: clamp(it.y, BAR.y, BAR.y + BAR.h) };
+    });
+    return out;
+}
+
+/* ---------------- safe mode ---------------- */
+
+/* This start's strike count, after counting it. */
+function countStart() {
+    const file = path.join(DIR, 'strikes');
+    let n = 0;
+    try {
+        n = clamp(fs.readFileSync(file, 'utf8').trim(), 0, 99);
+    } catch (e) {
+        n = 0;
+    }
+    n += 1;
+    try {
+        writeFile(file, `${n}\n`);
+    } catch (e) {
+        log(`strikes: ${e.message}`);
+    }
+    return n;
+}
+
+function clearStrikes() {
+    try {
+        writeFile(path.join(DIR, 'strikes'), '0\n');
+    } catch (e) {
+        log(`strikes: ${e.message}`);
+    }
+}
+
+/* ---------------- mgu-render's overlay_apps ---------------- */
+
+/* Adds id to overlay_apps in the renderer's local settings file, every other
+ * line kept. Returns 'set' (it was there), 'added', or 'no renderer'. */
+function ensureOverlay(file, id) {
+    if (!fs.existsSync(path.dirname(file))) {
+        return 'no renderer';
+    }
+    let text = '';
+    try {
+        text = fs.readFileSync(file, 'utf8');
+    } catch (e) {
+        if (e.code !== 'ENOENT') {
+            throw e;
+        }
+    }
+    const lines = text.length ? text.replace(/\n$/, '').split('\n') : [];
+    let at = -1;
+    lines.forEach((l, i) => {
+        if (/^\s*overlay_apps\s*=/.test(l)) {
+            at = i;
+        }
+    });
+    const ids = at < 0 ? [] : lines[at].replace(/^\s*overlay_apps\s*=/, '').split(/[\s,]+/).filter(Boolean);
+    if (ids.indexOf(id) >= 0) {
+        return 'set';
+    }
+    const line = `overlay_apps = ${ids.concat([id]).join(', ')}`;
+    if (at < 0) {
+        lines.push('# Climate Bar (mystrip_bar) draws in the climate bar', line);
+    } else {
+        lines[at] = line;
+    }
+    writeFile(file, `${lines.join('\n')}\n`, 0o644);
+    return 'added';
+}
+
+/* When the running renderer started (ms), or null. */
+function rendererStart() {
+    try {
+        const pids = fs.readdirSync(PROC).filter((p) => /^\d+$/.test(p));
+        for (let i = 0; i < pids.length; i++) {
+            let comm = '';
+            try {
+                comm = fs.readFileSync(path.join(PROC, pids[i], 'comm'), 'utf8').trim();
+            } catch (e) {
+                continue;
+            }
+            if (comm === 'mgu-render') {
+                return fs.statSync(path.join(PROC, pids[i])).mtime.getTime();
+            }
+        }
+    } catch (e) {
+        return null;
+    }
+    return null;
+}
+
+function groupId(name) {
+    try {
+        const line = fs.readFileSync(GROUP_FILE, 'utf8').split('\n').filter((l) => l.split(':')[0] === name)[0];
+        const gid = line ? Number(line.split(':')[2]) : NaN;
+        return isFinite(gid) ? gid : APP_GID;
+    } catch (e) {
+        return APP_GID;
+    }
+}
+
+/* ---------------- drawing ---------------- */
+
+class Ops {
+    constructor() {
+        this.parts = [];
+    }
+    u(v) {
+        const b = Buffer.alloc(4);
+        b.writeUInt32LE(v >>> 0, 0);
+        this.parts.push(b);
+        return this;
+    }
+    f() {
+        for (let i = 0; i < arguments.length; i++) {
+            const b = Buffer.alloc(4);
+            b.writeFloatLE(arguments[i], 0);
+            this.parts.push(b);
+        }
+        return this;
+    }
+    clear(c) { return this.u(OP.CLEAR).u(c); }
+    image(id, x, y, w, h) { return this.u(OP.IMAGE).f(x, y, w, h, 0).u(id); }
+    rrect(x, y, w, h, r, c) { return this.u(OP.RRECT).f(x, y, w, h, r).u(c); }
+    rstroke(x, y, w, h, r, lw, c) { return this.u(OP.RSTROKE).f(x, y, w, h, r, lw).u(c); }
+    line(xa, ya, xb, yb, w, c) { return this.u(OP.LINE).f(xa, ya, xb, yb, w).u(c); }
+    buffer() { return Buffer.concat(this.parts); }
+}
+
+/* The icons as premultiplied RGBA: each mask (seat, wheel) in its colour. */
+function iconPictures() {
+    const n = ICON_SIZE * ICON_SIZE;
+    const paint = (name, c) => {
+        const m = zlib.inflateSync(Buffer.from(ICON_MASKS[name], 'base64'));
+        const r = c >>> 24, g = (c >>> 16) & 255, b = (c >>> 8) & 255, px = Buffer.alloc(n * 4);
+        for (let i = 0; i < n; i++) {
+            const a = m[i], o = i * 4;
+            px[o] = (r * a + 127) / 255;
+            px[o + 1] = (g * a + 127) / 255;
+            px[o + 2] = (b * a + 127) / 255;
+            px[o + 3] = a;
+        }
+        return px;
+    };
+    const out = {};
+    out[IMG.seatUnknown] = paint('seat', DIM);
+    out[IMG.seat[0]] = paint('seat', WHITE);
+    [1, 2, 3].forEach((st) => { out[IMG.seat[st]] = paint('seat', RED); });
+    out[IMG.wheelUnknown] = paint('wheel', DIM);
+    out[IMG.wheelOff] = paint('wheel', WHITE);
+    out[IMG.wheelOn] = paint('wheel', RED);
+    return out;
+}
+
+/* A seat's level as BMW names them, 0 off to 4 very high: BMW's level as
+ * the car reports it, else the heater's stage (0-3); null while unknown. */
+function seatLevel(s) {
+    if (!s) {
+        return null;
+    }
+    if (typeof s.level === 'number' && s.level > 0) {
+        return Math.min(4, s.level);
+    }
+    if (typeof s.stage === 'number' && s.stage > 0) {
+        return Math.min(3, s.stage);
+    }
+    return typeof s.stage === 'number' || typeof s.level === 'number' ? 0 : null;
+}
+
+/* The level bar under an icon, square-cornered: for a seat four segments
+ * with small gaps, one lit (red) per level, left to right; for the wheel,
+ * which has one level, one solid bar. Grey at off and while unknown. */
+function drawMeter(o, cx, cy, s, level, parts) {
+    const w = s * 0.9, gap = Math.max(3, s * 0.05), h = Math.max(4, s * 0.075);
+    const n = parts || 4, seg = (w - (n - 1) * gap) / n, x0 = cx - w / 2, y = cy + s * 0.5 + Math.max(3, s * 0.05);
+    for (let i = 0; i < n; i++) {
+        o.rrect(x0 + i * (seg + gap), y, seg, h, 0, level !== null && i < level ? RED : DIM);
+    }
+}
+
+/* A button's touch box, in the layer's own px (the bar's top left is 0, 0). */
+function box(settings, k) {
+    const it = settings.items[k], w = Math.round(settings.size * 1.4);
+    return { x: it.x - BAR.x - w / 2, y: 0, w, h: BAR.h };
+}
+
+/* The bar's frame: every button over a patch of the bar's colour that hides
+ * BMW's own indicator beneath it, the line-up outlines over them. */
+function drawBar(st) {
+    const o = new Ops().clear(0x00000000);
+    if (!st.drawing) {
+        return o.buffer();
+    }
+    const s = st.settings.size;
+    ITEMS.forEach((k) => {
+        const b = box(st.settings, k), it = st.settings.items[k], cx = it.x - BAR.x, cy = it.y - BAR.y;
+        const seat = st.car[k], mode = st.settings.seats;
+        const drawn = k === 'wheel' || mode === 'drawn' || (mode === 'auto' && !(seat && seat.level === BMW_SHOWS));
+        if (drawn && k !== 'wheel' && st.settings.cover) {
+            o.rrect(b.x + 4, cy - s * 0.6, b.w - 8, s * 1.2, 14, SHADES[st.settings.shade]);
+        }
+        let id = null;
+        if (k === 'wheel') {
+            id = st.car.wheel === null ? IMG.wheelUnknown : st.car.wheel ? IMG.wheelOn : IMG.wheelOff;
+            drawMeter(o, cx, cy, s, st.car.wheel === null ? null : st.car.wheel ? 1 : 0, 1);    // one level: one solid bar
+        } else if (mode !== 'invisible') {
+            const level = seatLevel(seat);
+            if (drawn) {
+                id = level === null ? IMG.seatUnknown : level ? IMG.seat[3] : IMG.seat[0];
+            }
+            drawMeter(o, cx, cy, s, level);    // under BMW's own icon too, at very high
+        }
+        if (id !== null) {
+            o.image(id, cx - s / 2, cy - s / 2, s, s);
+        }
+        if (st.lineup) {
+            const sel = st.selected === k;
+            o.rstroke(b.x + 2, b.y + 2, b.w - 4, b.h - 4, 10, sel ? 6 : 3, sel ? YELLOW : CYAN);
+            o.line(cx - 10, cy, cx + 10, cy, 2, sel ? YELLOW : CYAN);
+            o.line(cx, cy - 10, cx, cy + 10, 2, sel ? YELLOW : CYAN);
+        }
+    });
+    return o.buffer();
+}
+
+/* ---------------- the renderer ---------------- */
+
+function msg(type, payload) {
+    const len = payload ? payload.length : 0;
+    const b = Buffer.alloc(8 + len + ((4 - (len & 3)) & 3));
+    b.writeUInt32LE(type, 0);
+    b.writeUInt32LE(b.length - 8, 4);
+    if (len) {
+        payload.copy(b, 8);
+    }
+    return b;
+}
+function u32msg(type, arr) {
+    const b = Buffer.alloc(arr.length * 4);
+    arr.forEach((v, i) => b.writeUInt32LE(v >>> 0, i * 4));
+    return msg(type, b);
+}
+
+class Bar {
+    constructor() {
+        this.settings = cleanSettings(readJson(path.join(DIR, 'settings.json'), null));
+        this.car = { dr: null, ps: null, wheel: null };
+        this.lineup = false;
+        this.selected = 'ps';
+        this.step = 0;
+        this.safe = false;
+        this.overlay = 'unknown';
+        this.renderer = 'connecting';
+        this.touchRouting = null;
+        this.sock = null;
+        this.ready = false;
+        this.native = false;
+        this.inbuf = Buffer.alloc(0);
+        this.down = null;
+        this.clients = new Set();
+        this.lastStatus = '';
+        this.pictures = iconPictures();
+    }
+
+    get drawing() {
+        return this.settings.enabled && !this.safe;
+    }
+
+    start() {
+        const strikes = countStart();
+        this.safe = strikes >= STRIKES;
+        log(`starting (start ${strikes} without ${HEALTHY_MS / 1000} s of running${this.safe ? ': safe mode, the bar stays off' : ''})`);
+        if (!this.safe) {
+            this.healthy = setTimeout(() => clearStrikes(), HEALTHY_MS);
+        }
+        this.checkOverlay();
+        this.listen();
+        this.connect();
+        this.timer = setInterval(() => this.frame(), FRAME_MS);
+    }
+
+    checkOverlay() {
+        try {
+            const r = ensureOverlay(LOCAL_CONF, ID);
+            if (r === 'no renderer') {
+                this.overlay = 'no renderer';
+            } else {
+                const started = rendererStart();
+                const changed = fs.statSync(LOCAL_CONF).mtime.getTime();
+                this.overlay = r === 'added' || (started !== null && changed > started) ? 'restart' : 'set';
+            }
+            log(`overlay_apps: ${r} (${this.overlay})`);
+        } catch (e) {
+            this.overlay = `error: ${e.message}`;
+            log(`overlay_apps: ${e.message}`);
+        }
+    }
+
+    save() {
+        try {
+            writeFile(path.join(DIR, 'settings.json'), `${JSON.stringify(this.settings, null, 2)}\n`);
+        } catch (e) {
+            log(`settings: ${e.message}`);
+        }
+    }
+
+    /* ---- the renderer ---- */
+
+    connect() {
+        if (this.closed) {
+            return;
+        }
+        const s = net.createConnection(RENDER_SOCKET);
+        this.sock = s;
+        this.inbuf = Buffer.alloc(0);
+        s.on('connect', () => {
+            s.write(msg(M.HELLO, Buffer.concat([Buffer.from(ID), Buffer.from([0]), Buffer.from('proto=mgu-render/1')])));
+        });
+        s.on('data', (d) => this.data(d));
+        s.on('error', (e) => {
+            if (this.renderer !== 'not running') {
+                log(`renderer: ${e.message}`);
+            }
+            this.setRenderer('not running');
+        });
+        s.on('close', () => {
+            this.ready = this.native = false;
+            this.sock = null;
+            this.down = null;
+            if (this.renderer === 'connected') {
+                this.setRenderer('not running');
+            }
+            if (!this.closed) {
+                this.retry = setTimeout(() => this.connect(), 3000);
+            }
+        });
+    }
+
+    setRenderer(v) {
+        if (this.renderer !== v) {
+            this.renderer = v;
+            this.status();
+        }
+    }
+
+    write(b) {
+        if (this.sock && this.ready && this.native) {
+            this.sock.write(b);
+        }
+    }
+
+    data(d) {
+        this.inbuf = this.inbuf.length ? Buffer.concat([this.inbuf, d]) : d;
+        while (this.inbuf.length >= 8) {
+            const type = this.inbuf.readUInt32LE(0), len = this.inbuf.readUInt32LE(4);
+            if (this.inbuf.length < 8 + len) {
+                break;
+            }
+            const p = this.inbuf.slice(8, 8 + len);
+            this.inbuf = this.inbuf.slice(8 + len);
+            this.event(type, p);
+        }
+    }
+
+    event(type, p) {
+        if (type === X.READY) {
+            this.native = true;
+        } else if (type === E.READY) {
+            this.ready = true;
+            this.touchRouting = p.length >= 16 ? !!p.readUInt32LE(12) : null;
+            if (!this.native) {
+                log('renderer: not mgu-render (no mgu-render/1)');
+                this.setRenderer('not mgu-render');
+                return;
+            }
+            log(`renderer: connected (touch routing ${this.touchRouting ? 'on' : 'off'})`);
+            this.write(u32msg(X.MODE, [1]));
+            const pl = Buffer.alloc(28);
+            [BAR.x, BAR.y, BAR.w, BAR.h].forEach((v, i) => pl.writeInt32LE(v, i * 4));
+            pl.writeFloatLE(1, 16);
+            this.write(msg(M.PLACE, pl));
+            Object.keys(this.pictures).forEach((id) => {
+                const head = Buffer.alloc(12);
+                head.writeUInt32LE(Number(id), 0); head.writeUInt32LE(ICON_SIZE, 4); head.writeUInt32LE(ICON_SIZE, 8);
+                this.write(msg(M.IMAGE, Buffer.concat([head, this.pictures[id]])));
+            });
+            this.sentClaims = null;
+            this.sentShow = null;
+            this.renderer = 'connected';
+            this.status(true);
+            this.frame();
+        } else if (type === E.TOUCH && p.length >= 12) {
+            this.touch(p.readUInt32LE(0), p.readFloatLE(4), p.readFloatLE(8));
+        } else if (type === E.ERROR) {
+            log(`renderer error: ${p.toString()}`);
+        } else if (type === E.CLOSED) {
+            this.sentShow = null;                // shown again with the next frame
+        }
+    }
+
+    /* Claims, visibility and the frame, sent each FRAME_MS and on every change. */
+    frame() {
+        if (!this.ready || !this.native) {
+            return;
+        }
+        const claims = this.drawing ? ITEMS.map((k) => box(this.settings, k)) : [];
+        const key = JSON.stringify(claims);
+        if (key !== this.sentClaims) {
+            const b = Buffer.alloc(4 + claims.length * 16);
+            b.writeUInt32LE(claims.length, 0);
+            claims.forEach((r, i) => [r.x, r.y, r.w, r.h].forEach((v, j) => b.writeFloatLE(v, 4 + i * 16 + j * 4)));
+            this.write(msg(M.CLAIM, b));
+            this.sentClaims = key;
+        }
+        if (this.sentShow !== this.drawing) {
+            this.write(u32msg(M.SHOW, [this.drawing ? 1 : 0]));
+            this.sentShow = this.drawing;
+        }
+        this.write(msg(M.FRAME, drawBar(this)));
+    }
+
+    itemAt(x, y) {
+        for (let i = 0; i < ITEMS.length; i++) {
+            const b = box(this.settings, ITEMS[i]);
+            if (x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h) {
+                return ITEMS[i];
+            }
+        }
+        return null;
+    }
+
+    touch(phase, x, y) {
+        if (!this.drawing) {
+            return;
+        }
+        if (phase === 1) {
+            this.down = { item: this.itemAt(x, y), at: Date.now() };
+        } else if (phase === 3) {
+            const d = this.down;
+            this.down = null;
+            const item = this.itemAt(x, y);
+            if (!d || !item || d.item !== item || Date.now() - d.at > TAP_MS) {
+                return;
+            }
+            if (this.lineup) {
+                this.selected = item;
+                this.status();
+                this.frame();
+            } else {
+                log(`tap ${item}`);
+                this.broadcast({ tap: item });
+            }
+        }
+    }
+
+    /* ---- Climate Strip ---- */
+
+    listen() {
+        try {
+            if (fs.lstatSync(LINK_SOCKET).isSocket()) {
+                fs.unlinkSync(LINK_SOCKET);
+            }
+        } catch (e) {
+            // none there
+        }
+        this.server = net.createServer((c) => this.client(c));
+        this.server.on('error', (e) => log(`link: ${e.message}`));
+        this.server.listen(LINK_SOCKET, () => {
+            try {
+                if (process.getuid && process.getuid() === 0) {
+                    fs.chownSync(LINK_SOCKET, 0, groupId(APP_GROUP));
+                }
+                fs.chmodSync(LINK_SOCKET, 0o660);
+            } catch (e) {
+                log(`link: ${e.message}`);
+            }
+            log(`link: ${LINK_SOCKET}`);
+        });
+    }
+
+    client(c) {
+        this.clients.add(c);
+        let buf = '';
+        c.setEncoding('utf8');
+        c.on('data', (d) => {
+            buf += d;
+            if (buf.length > 65536) {
+                c.destroy();
+                return;
+            }
+            let at;
+            while ((at = buf.indexOf('\n')) >= 0) {
+                const line = buf.slice(0, at);
+                buf = buf.slice(at + 1);
+                let m = null;
+                try {
+                    m = JSON.parse(line);
+                } catch (e) {
+                    m = null;
+                }
+                if (m && typeof m === 'object') {
+                    this.command(m);
+                }
+            }
+        });
+        c.on('error', () => {});
+        c.on('close', () => this.clients.delete(c));
+        this.send(c, { status: this.statusValue() });
+    }
+
+    send(c, m) {
+        try {
+            c.write(`${JSON.stringify(m)}\n`);
+        } catch (e) {
+            // gone
+        }
+    }
+
+    broadcast(m) {
+        this.clients.forEach((c) => this.send(c, m));
+    }
+
+    command(m) {
+        if (m.car && typeof m.car === 'object') {
+            const seat = (s) => (s && typeof s === 'object' ? {
+                level: typeof s.level === 'number' ? s.level : null, stage: typeof s.stage === 'number' ? s.stage : null } : null);
+            this.car = { dr: seat(m.car.dr), ps: seat(m.car.ps), wheel: typeof m.car.wheel === 'boolean' ? m.car.wheel : null };
+            this.frame();
+            return;
+        }
+        const it = this.settings.items[this.selected];
+        const step = STEPS[this.step];
+        switch (m.cmd) {
+        case 'enable':
+            this.settings.enabled = !!m.on;
+            if (m.on && this.safe) {
+                this.safe = false;
+                clearStrikes();
+            }
+            this.save();
+            break;
+        case 'lineup':
+            this.lineup = !!m.on;
+            break;
+        case 'select':
+            this.selected = ITEMS.indexOf(m.item) >= 0 ? m.item : ITEMS[(ITEMS.indexOf(this.selected) + 1) % ITEMS.length];
+            break;
+        case 'move':
+            it.x = clamp(it.x + clamp(m.dx || 0, -1, 1) * step, BAR.x, BAR.x + BAR.w);
+            it.y = clamp(it.y + clamp(m.dy || 0, -1, 1) * step, BAR.y, BAR.y + BAR.h);
+            this.save();
+            break;
+        case 'size':
+            this.settings.size = clamp(this.settings.size + clamp(m.d || 0, -1, 1) * Math.max(2, Math.round(step / 2)), 32, 110);
+            this.save();
+            break;
+        case 'step':
+            this.step = (this.step + 1) % STEPS.length;
+            break;
+        case 'cover':
+            this.settings.cover = !this.settings.cover;
+            this.save();
+            break;
+        case 'seats':
+            this.settings.seats = SEAT_MODES[(SEAT_MODES.indexOf(this.settings.seats) + 1) % SEAT_MODES.length];
+            this.save();
+            break;
+        case 'shade':
+            this.settings.shade = (this.settings.shade + 1) % SHADES.length;
+            this.save();
+            break;
+        case 'reset':
+            this.settings = cleanSettings({ enabled: this.settings.enabled, seats: this.settings.seats });
+            this.save();
+            break;
+        default:
+            return;
+        }
+        this.status();
+        this.frame();
+    }
+
+    statusValue() {
+        return {
+            renderer: this.renderer, overlay: this.overlay, touchRouting: this.touchRouting,
+            safe: this.safe, enabled: this.settings.enabled, lineup: this.lineup, selected: this.selected,
+            step: STEPS[this.step], settings: this.settings
+        };
+    }
+
+    status(force) {
+        const v = this.statusValue(), key = JSON.stringify(v);
+        if (force || key !== this.lastStatus) {
+            this.lastStatus = key;
+            this.broadcast({ status: v });
+        }
+    }
+
+    stop() {
+        this.closed = true;
+        clearInterval(this.timer);
+        clearTimeout(this.retry);
+        clearTimeout(this.healthy);
+        if (this.sock) {
+            this.sock.destroy();
+        }
+        if (this.server) {
+            this.server.close();
+        }
+        this.clients.forEach((c) => c.destroy());
+    }
+}
+
+if (require.main === module) {
+    const bar = new Bar();
+    process.on('SIGTERM', () => { bar.stop(); process.exit(0); });
+    process.on('uncaughtException', (e) => { log(`failed: ${e && e.stack}`); process.exit(1); });
+    bar.start();
+}
+
+module.exports = { Bar, ensureOverlay, cleanSettings, drawBar, seatLevel, box, iconPictures, BAR, ITEMS, OP, IMG, ICON_SIZE };
