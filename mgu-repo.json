@@ -70,9 +70,9 @@
   ],
   "tools": [
     {
-      "id": "mystrip_bar",
+      "id": "mystrip-bar",
       "path": "services/mystrip_bar",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "title": "Climate Bar",
       "mguHmi": [
         "ID8"

@@ -26,7 +26,7 @@ const VERSION = '0.2.0';
 const PREFIX = 'ClimateStrip';
 const TITLE = 'Climate Strip';
 const DESCRIPTION = 'Seat and steering wheel heating: your seat, the passenger seat and the wheel, with the levels the car reports; runs the Climate Bar\'s buttons';
-const BAR = { id: 'mystrip_bar', path: 'services/mystrip_bar', version: '0.1.0', title: 'Climate Bar', mguHmi: ['ID8'],
+const BAR = { id: 'mystrip-bar', path: 'services/mystrip_bar', version: '0.1.1', title: 'Climate Bar', mguHmi: ['ID8'],
     description: 'Seat and steering wheel heating buttons in the climate bar, over BMW\'s own indicators; needs Climate Strip and the Renderer',
     service: { exec: 'mystrip-bar', user: 'root', runtimeDirectory: 'mystrip-bar', after: ['mgu-render.service'] } };
 const IFACES = ['de.bmw.infotainment.climate.Climate', 'de.bmw.body.steeringwheelcomfort.SteeringWheelClimate'];
@@ -119,7 +119,7 @@ function build() {
     const m = JSON.parse(fs.readFileSync(file, 'utf8'));
     m.components = m.components.filter((c) => c.id !== ID);
     m.components.push({ id: ID, kind: 'app', path: `apps/${ID}`, build: 'unit', mguHmi: ['ID8'], title: TITLE, description: DESCRIPTION });
-    m.tools = (m.tools || []).filter((t) => t.id !== BAR.id).concat([BAR]);
+    m.tools = (m.tools || []).filter((t) => t.id !== BAR.id && t.id !== 'mystrip_bar').concat([BAR]);
     fs.writeFileSync(file, json(m));
     return dir;
 }

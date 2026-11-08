@@ -118,13 +118,13 @@ async function until(pred, what) {
     bar.start();
 
     // overlay_apps: ours added beside the other app's, the other lines kept; the renderer must restart
-    assert.strictEqual(fs.readFileSync(env.MYSTRIP_BAR_LOCAL_CONF, 'utf8'), '# mine\nfps = 30\noverlay_apps = other_app, mystrip_bar\n');
+    assert.strictEqual(fs.readFileSync(env.MYSTRIP_BAR_LOCAL_CONF, 'utf8'), '# mine\nfps = 30\noverlay_apps = other_app, mystrip-bar\n');
     assert.strictEqual(bar.overlay, 'restart');
 
     // placed over the climate bar, three claims, shown
     await until(() => lastOf(7), 'a frame');
     const hello = R.msgs[0].p.toString();
-    assert.strictEqual(hello.split('\0')[0], 'mystrip_bar');
+    assert.strictEqual(hello.split('\0')[0], 'mystrip-bar');
     assert.ok(/proto=mgu-render\/1/.test(hello));
     assert.strictEqual(lastOf(0x4d520001).p.readUInt32LE(0), 1, 'layer mode');
     const pl = lastOf(2).p;
@@ -261,7 +261,7 @@ async function until(pred, what) {
 
     // no renderer folder: said so, nothing written
     fs.rmSync(path.join(T, 'mgu-render'), { recursive: true });
-    assert.strictEqual(BAR.ensureOverlay(env.MYSTRIP_BAR_LOCAL_CONF, 'mystrip_bar'), 'no renderer');
+    assert.strictEqual(BAR.ensureOverlay(env.MYSTRIP_BAR_LOCAL_CONF, 'mystrip-bar'), 'no renderer');
     assert.ok(!fs.existsSync(path.join(T, 'mgu-render')));
 
     if (process.argv[2]) { fs.writeFileSync(process.argv[2], JSON.stringify(preview)); }

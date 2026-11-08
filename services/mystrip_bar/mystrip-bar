@@ -29,7 +29,7 @@
  *   bar -> Climate Strip  {"tap": "dr"|"ps"|"wheel"}   a button was tapped
  *                         {"status": {...}}             sent on connect and whenever it changes
  *
- * Safe mode: each start counts a strike in /var/opt/mystrip_bar/strikes and
+ * Safe mode: each start counts a strike in /var/opt/mystrip-bar/strikes and
  * 2 minutes of running clears it. A third start in a row with none of them
  * getting that far (the head unit restarted twice, each time within
  * 2 minutes of starting, or this service crashing) leaves the bar off,
@@ -54,9 +54,9 @@ const net = require('net');
 const path = require('path');
 const zlib = require('zlib');
 
-const ID = 'mystrip_bar';
+const ID = 'mystrip-bar';           // the Store's tool id: lower case, digits and hyphens
 const ENV = process.env;
-const DIR = ENV.MYSTRIP_BAR_DIR || '/var/opt/mystrip_bar';
+const DIR = ENV.MYSTRIP_BAR_DIR || '/var/opt/mystrip-bar';
 const RENDER_SOCKET = ENV.MYSTRIP_BAR_RENDER || '/run/mgu-render/render.sock';
 const LOCAL_CONF = ENV.MYSTRIP_BAR_LOCAL_CONF || '/var/opt/mgu-render/mgu-render.local.conf';
 const LINK_SOCKET = ENV.MYSTRIP_BAR_LINK || '/run/mystrip-bar/bar.sock';
@@ -200,7 +200,7 @@ function ensureOverlay(file, id) {
     }
     const line = `overlay_apps = ${ids.concat([id]).join(', ')}`;
     if (at < 0) {
-        lines.push('# Climate Bar (mystrip_bar) draws in the climate bar', line);
+        lines.push('# Climate Bar (mystrip-bar) draws in the climate bar', line);
     } else {
         lines[at] = line;
     }
