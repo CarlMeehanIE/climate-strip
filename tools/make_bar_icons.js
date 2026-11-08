@@ -20,6 +20,7 @@ const SIZE = 128;
 const DIR = path.join(__dirname, '..', 'services', 'mystrip_bar');
 const FILE = path.join(DIR, 'mystrip-bar');
 const ICONS = ['seat', 'wheel'];
+const MIRROR = ['seat'];              // drawn facing the other way to the drawing: backrest on the left, as in the car
 
 async function masks() {
     const browser = await chromium.launch();
@@ -84,7 +85,14 @@ async function masks() {
             }
             return a;
         }, [url, SIZE, vector]);
-        out[name] = zlib.deflateSync(Buffer.from(alpha), { level: 9 }).toString('base64');
+        let mask = alpha;
+        if (MIRROR.indexOf(name) >= 0) {
+            mask = [];
+            for (let y = 0; y < SIZE; y++) {
+                for (let x = SIZE - 1; x >= 0; x--) mask.push(alpha[y * SIZE + x]);
+            }
+        }
+        out[name] = zlib.deflateSync(Buffer.from(mask), { level: 9 }).toString('base64');
     }
     await browser.close();
     return out;

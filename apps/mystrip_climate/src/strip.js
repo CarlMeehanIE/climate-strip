@@ -60,6 +60,7 @@ const STAGES = 4;                       // seatHeatingLamination's stages: STUFE
 const LEVELS = ['off', 'low', 'medium', 'high', 'very high'];   // statusSeatHeaterAUTO STUFE_0 .. STUFE_4
 const NAMES = { dr: 'your seat', ps: 'the passenger seat', wheel: 'the steering wheel' };
 const SHADE_COUNT = 4;
+const POLL_MS = 2000;                 // how often the car's values are read again
 const REQUESTOR = 1;                    // the wheel request's first requestor byte (Heat Test's default)
 
 const PRESS_DEDUPE_MS = 400;
@@ -340,6 +341,8 @@ class ClimateStrip extends OnlineApp {
         const next = (from + 1) % STAGES;
         return this._setSeat(seat, next).then(() => {
             this._sent[seat] = next;
+            this._car[seat].stage = next;            // until the car's own reading says otherwise
+            this._changed();
             return `${seat === 'dr' ? 'Driver' : 'Passenger'} seat → stage ${next}`;
         });
     }
@@ -354,7 +357,11 @@ class ClimateStrip extends OnlineApp {
         const next = ((typeof now === 'number' ? now : 0) + 1) % LEVELS.length;
         const value = this._cat.fill(r.ref, (path) => (path === r.member ? `STUFE_${next}` : undefined));
         return this._proxy(CLIMATE).then((p) => within(this._setField(p, r.field, value), CALL_MS, r.field))
-            .then(() => `${seat === 'dr' ? 'Driver' : 'Passenger'} seat → ${LEVELS[next]} (${r.field}.${r.member})`);
+            .then(() => {
+                this._car[seat].level = next;        // until the car's own reading says otherwise
+                this._changed();
+                return `${seat === 'dr' ? 'Driver' : 'Passenger'} seat → ${LEVELS[next]} (${r.field}.${r.member})`;
+            });
     }
 
     _setSeat(seat, stage) {
@@ -389,7 +396,11 @@ class ClimateStrip extends OnlineApp {
             }
         });
         return this._proxy(WHEEL).then((p) => within(this._callMethod(p, 'requestHeating', args), CALL_MS, 'requestHeating'))
-            .then(() => `Steering wheel → ${on ? 'on' : 'off'}`);
+            .then(() => {
+                this._car.wheel = on;                // until the car's own reading says otherwise
+                this._changed();
+                return `Steering wheel → ${on ? 'on' : 'off'}`;
+            });
     }
 
     /* The native proxy inside the SDK's typed one, as Heat Test uses it. */
@@ -445,8 +456,12 @@ class ClimateStrip extends OnlineApp {
         return loadCatalog().then((cat) => { this._cat = cat; });
     }
 
-    /* What the car reports, kept up to date. */
+    /* What the car reports, kept up to date: subscribed, and read again every
+     * POLL_MS too, since an app started with the head unit is not always
+     * sent the changes (the car reported a seat's level changing to Heat
+     * Watch, opened by hand, but not to this app). */
     _watchCar() {
+        this._pollers = [];
         const sub = (iface, field, fn) => this._proxy(iface)
             .then((p) => {
                 const a = p[field];
@@ -458,11 +473,16 @@ class ClimateStrip extends OnlineApp {
                     pr.push(a.subscribe((v) => { fn(plain(v)); this._changed(); }));
                 }
                 if (typeof a.getValue === 'function') {
-                    pr.push(Promise.resolve(a.getValue()).then((v) => { fn(plain(v)); this._changed(); }));
+                    const read = () => Promise.resolve(a.getValue()).then((v) => { fn(plain(v)); this._changed(); });
+                    this._pollers.push(read);
+                    pr.push(read());
                 }
                 return Promise.all(pr);
             })
             .catch((err) => logger.info(`strip ${field}: ${err && err.message}`));
+        if (!this._pollTimer) {
+            this._pollTimer = setInterval(() => this._poll(), POLL_MS);
+        }
         const num = (v, k) => (v && typeof v === 'object' && typeof v[k] === 'number' ? v[k] : null);
         sub(CLIMATE, 'statusAURAPerso', (v) => {
             const l = autoLevels(v);
@@ -478,13 +498,26 @@ class ClimateStrip extends OnlineApp {
         sub(WHEEL, 'heatingState', (v) => { this._car.wheel = v && typeof v === 'object' && 'heating' in v ? !!v.heating : null; });
     }
 
-    /* The car's state changed: the rows and the bar. */
+    /* Each value read again, one round at a time. */
+    _poll() {
+        if (this._polling || !this._pollers || !this._pollers.length) {
+            return;
+        }
+        this._polling = true;
+        Promise.all(this._pollers.map((read) => read().catch(() => null)))
+            .then(() => { this._polling = false; }, () => { this._polling = false; });
+    }
+
+    /* The car's state changed: the rows and the bar (only when it did). */
     _changed() {
         const c = this._car;
         const car = { dr: { level: c.dr.level, stage: c.dr.stage }, ps: { level: c.ps.level, stage: c.ps.stage }, wheel: c.wheel };
         const key = JSON.stringify(car);
-        if (this._link && key !== this._carKey) {
-            this._carKey = key;
+        if (key === this._carKey) {
+            return;
+        }
+        this._carKey = key;
+        if (this._link) {
             this._link.send({ car });
         }
         this._render();
@@ -742,6 +775,7 @@ class ClimateStrip extends OnlineApp {
         if (this._link) {
             this._link.stop();
         }
+        clearInterval(this._pollTimer);
         this._shutdownPromise = Promise.resolve()
             .then(() => this.destroyBundles().catch((err) => logger.info(`destroyBundles: ${err && err.message}`)))
             .then(() => process.exit(0));

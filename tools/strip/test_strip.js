@@ -107,7 +107,7 @@ class OnlineApp extends EventEmitter {
     initialized() { this._initialized = true; return Promise.resolve(); }
 }
 /* The car. */
-const car = { dr: 0, ps: 2, autoDr: 'STUFE_0', autoPs: 'STUFE_3', wheel: false, fail: false };
+const car = { dr: 0, ps: 2, autoDr: 'STUFE_0', autoPs: 'STUFE_3', wheel: false, fail: false, silent: false };
 const sent = [];
 const subs = {};
 /* As the car's proxy hands it over: an object whose members (and enum
@@ -116,6 +116,7 @@ const wrapped = (o) => { const w = { _m: o }; Object.defineProperty(w, 'toJSON',
 const en = (name) => ({ _v: Number(name.replace('STUFE_', '')), toJSON: () => name });
 const aura = () => wrapped({ statusSeatHeaterAUTODriver: en(car.autoDr), statusSeatHeaterAUTOPassenger: en(car.autoPs), other: 7 });
 function notify() {
+    if (car.silent) { return; }       // as on the car: the change not sent to an app started with the head unit
     if (subs.statusSeatHeatingDR) { subs.statusSeatHeatingDR({ statusSeatHeaterDR: car.dr }); }
     if (subs.statusSeatHeatingPS) { subs.statusSeatHeatingPS({ statusSeatHeaterPS: car.ps }); }
     if (subs.statusAURAPerso) { subs.statusAURAPerso(aura()); }
@@ -337,6 +338,28 @@ async function tap(i) {
     await until(() => row(2) === 'Climate bar: not running (install Climate Bar from the Store)', 'the bar gone');
     await tap(0);
     await until(() => row(3) === 'Settings ›', 'back');
+
+    // no changes sent by the car: what was sent is kept, and the car is read again every 2 s
+    car.silent = true;
+    car.autoDr = 'STUFE_0';
+    await until(() => /^Your seat \(driver\): off/.test(row(0) || ''), 'driver off, read again', 4000);
+    await tap(3);
+    await until(() => row(0) === '‹ Back', 'settings');
+    await tap(1);
+    await until(() => /BMW's level/.test(row(1) || ''), 'BMW\'s level');
+    await tap(0);
+    await until(() => row(3) === 'Settings ›', 'back');
+    const steps = [];
+    for (let i = 0; i < 5; i++) {
+        await tap(0);
+        await until(() => /→/.test(last('ClimateStripLog.0.PrimaryText') || '') && steps.length === i && sent.length, 'sent');
+        await tick(30);
+        steps.push(sent[sent.length - 1].value.operationSeatHeaterAUTODriver);
+    }
+    assert.deepStrictEqual(steps, ['STUFE_1', 'STUFE_2', 'STUFE_3', 'STUFE_4', 'STUFE_0'], 'low, medium, high, very high, off');
+    car.autoDr = 'STUFE_2';            // BMW's own button, no change sent
+    await until(() => /^Your seat \(driver\): medium/.test(row(0) || ''), 'BMW\'s own change read within 2 s', 4000);
+    car.silent = false;
 
     assert.ok(!logged.some((l) => /MISS|render .*failed/.test(l)), logged.join('\n'));
     console.log('Climate Strip checks passed');

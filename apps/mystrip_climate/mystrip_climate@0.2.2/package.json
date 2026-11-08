@@ -1,6 +1,6 @@
 {
   "name": "mystrip_climate",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Seat and steering wheel heating: your seat, the passenger seat and the wheel, with the levels the car reports; runs the Climate Bar's buttons",
   "private": false,
   "main": "javascript/runner.js",

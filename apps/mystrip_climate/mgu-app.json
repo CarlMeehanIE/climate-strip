@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "id": "mystrip_climate",
-  "version": "0.2.1",
-  "tree": "mystrip_climate@0.2.1",
+  "version": "0.2.2",
+  "tree": "mystrip_climate@0.2.2",
   "modules": [
     "src/strip.js",
     "src/bar_link.js",

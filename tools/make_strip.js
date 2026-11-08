@@ -22,11 +22,11 @@ const REPO = path.join(__dirname, '..');
 const FINDER = path.join(REPO, 'apps', 'mystrip_finder');
 const FINDER_TREE = path.join(FINDER, JSON.parse(fs.readFileSync(path.join(FINDER, 'mgu-app.json'), 'utf8')).tree);
 const ID = 'mystrip_climate';
-const VERSION = '0.2.1';
+const VERSION = '0.2.2';
 const PREFIX = 'ClimateStrip';
 const TITLE = 'Climate Strip';
 const DESCRIPTION = 'Seat and steering wheel heating: your seat, the passenger seat and the wheel, with the levels the car reports; runs the Climate Bar\'s buttons';
-const BAR = { id: 'mystrip-bar', path: 'services/mystrip_bar', version: '0.1.1', title: 'Climate Bar', mguHmi: ['ID8'],
+const BAR = { id: 'mystrip-bar', path: 'services/mystrip_bar', version: '0.1.2', title: 'Climate Bar', mguHmi: ['ID8'],
     description: 'Seat and steering wheel heating buttons in the climate bar, over BMW\'s own indicators; needs Climate Strip and the Renderer',
     service: { exec: 'mystrip-bar', user: 'root', runtimeDirectory: 'mystrip-bar', after: ['mgu-render.service'] } };
 const IFACES = ['de.bmw.infotainment.climate.Climate', 'de.bmw.body.steeringwheelcomfort.SteeringWheelClimate'];
