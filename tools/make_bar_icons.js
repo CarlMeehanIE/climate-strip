@@ -5,7 +5,7 @@
  * 128x128 coverage masks, deflated and base64, from the owner's icon
  * drawings in services/mystrip_bar/icons: an SVG (seat.svg, wheel.svg) drawn
  * straight at 128 px, its fill taken as covered, else the PNG (dark lines on
- * white) scaled up smoothly with its edges sharpened again. The service colours them at its
+ * white) scaled to fit, its edges sharpened again only when scaled up. The service colours them at its
  * start (white off, red on, dim while unknown).
  *
  * Needs Playwright with Chromium (on the computer, never the car):
@@ -72,8 +72,13 @@ async function masks() {
             ctx.drawImage(c, Math.round((size - dw) / 2), Math.round((size - dh) / 2), dw, dh);
             const d = ctx.getImageData(0, 0, size, size).data;
             const a = [];
+            const up = fit > 1;            // only an image scaled up needs its edges sharpened again
             for (let i = 0; i < d.length; i += 4) {
                 const dark = 1 - (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) / 255;
+                if (!up) {
+                    a.push(Math.round(dark * 255));
+                    continue;
+                }
                 const t = Math.max(0, Math.min(1, (dark - 0.3) / 0.4));     // the blur of scaling taken back to an edge
                 a.push(Math.round(t * t * (3 - 2 * t) * 255));
             }
